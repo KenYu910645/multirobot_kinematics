@@ -1,0 +1,9 @@
+<?xml version="1.0"?>
+
+<launch>
+    <arg name="use_rviz" default="true" /> 
+    <node pkg="rviz" type="rviz" name="rviz" args="-d $(find multirobot_kinematics)/rviz/kinematics.rviz" if="$(arg use_rviz)" />
+    <!-- map server-->
+    <node pkg="multirobot_kinematics" type="interactive_marker.py" name="interacitve_marker" output='screen'/>
+    <node pkg="multirobot_kinematics" type="kinematics.py" name="kinematics" output='screen'/>
+</launch>
