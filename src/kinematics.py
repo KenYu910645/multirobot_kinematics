@@ -19,7 +19,8 @@ import pstats # for sorting result
 import random
 
 DT = 0.5 # sec
-NUM_LINE_SEG = 30 # For arc
+BIG_NUM = 100 # A very big number for infinity line drawing 
+NUM_LINE_SEG = 30 # For arc stepping 
 marker_sphere = MarkerArray()
 marker_line   = MarkerArray()
 marker_text   = MarkerArray()
@@ -31,10 +32,10 @@ class Car():
     def __init__(self, id, init_kine): # unique id for every robot 
         self.id = id 
         (self.x,self.y,self.theta,self.v,self.w) = init_kine
-        # ---- # 
+        # --Center of rotation-- # 
         self.x_c = 0
         self.y_c = 0
-        # ---- # 
+        # --Final position-- # 
         self.x_p = 0
         self.y_p = 0
         self.theta_p = 0
@@ -67,14 +68,30 @@ class Car():
         self.kinematic_result.pose.orientation.w = q[3]
         # ---- update rotation center -----# 
         set_sphere((self.x_c,self.y_c), (0,255,255) , 0.2, self.id)
-        # ---- update arc -----#
+        # ---- update path arc -----#
         circle_points = [] 
         for i in range (NUM_LINE_SEG + 1):
             t = (dt/NUM_LINE_SEG)*i
             point = (self.x_c + r*sin(self.theta + self.w*t), self.y_c - r*cos(self.theta + self.w*t))
             circle_points.append(point)
         set_line(circle_points, (255,255,0), 0.02,self.id)
-        # ----# 
+        # ---- update drag line -----#
+        try: 
+            slope = ( (self.y_p - self.y) / (self.x_p - self.x))
+        except ZeroDivisionError: 
+            slope = float('inf')
+        set_line([(self.x-BIG_NUM,self.y-BIG_NUM*slope),(self.x+BIG_NUM,self.y+BIG_NUM*slope)], (255,255,255), 0.02,self.id+10)
+
+        # ---- update physical constriant circle ----# 
+        if self.id == 1: # if is car_1
+            circle_points = [] 
+            for i in range (70 + 1):
+                dtheta = i*(math.pi*2/70)
+                point = (self.x_p + L*sin(dtheta), self.y_p - L*cos(dtheta))
+                circle_points.append(point)
+            set_line(circle_points, (255,130,120), 0.02,1000)
+
+        # --Allow main loop to publish markers-- # 
         self.is_need_pub = True
 
 def initial_pose_goal_CB(pose):
@@ -104,7 +121,7 @@ def marker_feedback_CB(data):
             car_2.x     = data.pose.position.x
             car_2.y     = data.pose.position.y
             car_2.theta = euler[2]
-
+    #---- Sliders -----# 
     elif data.marker_name == "v1":
         car_1.v = data.pose.position.y * 5
         set_text((-3,data.pose.position.y+1) , str(round(car_1.v ,2)) , (255,255,255) , 0.3, 1)
@@ -226,6 +243,8 @@ def set_text(point,text , RGB = None  , size = 0.2, id = 0):
     (marker.pose.position.x , marker.pose.position.y) = point
     marker_text.markers.append(marker)
 
+
+#--- Init cars -----# 
 #           id ,x,y,theta,v,w
 car_1 = Car(1, (0,0,0,5,5))
 car_2 = Car(2, (4,0,0,5,5))
@@ -256,6 +275,11 @@ def main(args):
     set_text((0,-1) , "L_error = " + str(round(L_error,3)) , (255,255,255) , 0.3, 5)
 
     while (not rospy.is_shutdown()):
+        if car_1.is_need_pub or car_2.is_need_pub or is_text_need_publish: 
+            
+            set_line([(car_1.x,car_1.y),(car_2.x,car_2.y)], (150,0,0), 0.1,100)
+            #---- update Final position L linkage -----# 
+            set_line([(car_1.x_p,car_1.y_p),(car_2.x_p,car_2.y_p)], (255,0,0), 0.1,101)
         if car_1.is_need_pub:
             pub_car_1_result.publish(car_1.kinematic_result)
             pub_marker_sphere.publish(marker_sphere)
@@ -269,6 +293,7 @@ def main(args):
         if is_text_need_publish:
             pub_marker_text.publish(marker_text)
             is_text_need_publish = False
+        
         r.sleep()
 
 if __name__ == '__main__':
