@@ -2,9 +2,7 @@
 import rospy 
 import sys
 import time
-import operator
-import math
-from math import sin, cos , pi, atan2 
+from math import sin, cos , pi, atan2 ,acos,asin, sqrt
 # ROS msg and libraries
 from nav_msgs.msg import OccupancyGrid, Path # Global map 
 from geometry_msgs.msg import Point, PoseArray, PoseStamped, Pose2D, Pose,PoseWithCovarianceStamped# Global path
@@ -18,28 +16,27 @@ import re
 import pstats # for sorting result 
 import random
 
-import copy
 from interactive_markers.interactive_marker_server import *
 from interactive_markers.menu_handler import *
 from visualization_msgs.msg import *
-from tf.broadcaster import TransformBroadcaster
 
-server = None # For interative markers
 
 DT = 0.5 # sec
 BIG_NUM = 100 # A very big number for infinity line drawing 
 NUM_LINE_SEG = 30 # For arc stepping 
-marker_sphere = MarkerArray()
-marker_line   = MarkerArray()
-marker_text   = MarkerArray()
-is_global_publish = True 
+INF_SMALL = 0.0000000001
+EQUALITY_ERROR = 0.000001
 L = 4
-L_error = 0 
-
 #--- init value -----# 
 INIT_VC = 5
 INIT_WC = 5
 SLIDER_GAIN = 1
+#---- Global variable ----# 
+server = None # For interative markers
+marker_sphere = MarkerArray()
+marker_line   = MarkerArray()
+marker_text   = MarkerArray()
+is_global_publish = True 
 
 class Car():
     def __init__(self, id, init_kine): # unique id for every robot 
@@ -63,7 +60,7 @@ class Car():
         try: 
             r = self.v/self.w # divide by zero
         except ZeroDivisionError:
-            self.w = 0.0000000001
+            self.w = INF_SMALL
             r = self.v/self.w
         # --- rotation center ----# 
         self.x_c = self.x - r*sin(self.theta)
@@ -100,13 +97,32 @@ class Car():
         '''
         This should be only called by car_1, car_2
         '''
+        try: 
+            slope = (self.y_p - self.y) / (self.x_p - self.x)
+        except ZeroDivisionError:  
+            slope = (self.y_p - self.y) / INF_SMALL
+        A = sin(self.theta) * slope + cos(self.theta)
+        theta_1 = acos(1 / sqrt(1+slope**2)) - acos(A / sqrt(1+slope**2))
+        theta_2 = asin(A / sqrt(1+slope**2)) - asin(1 / sqrt(1+slope**2))
+        print ("theta_1 : " + str(theta_1))
+        print ("theta_2 : " + str(theta_2))
+        if (theta_1 - theta_2) < EQUALITY_ERROR : # theta_1 == theta_2 
+            self.theta_p = theta_1 # I
+        else:
+            print ("[QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQq]")
+            if 0 <= theta_2 <= (pi/2):# II
+                self.theta_p = theta_1 
+            elif  -(pi/2) <= theta_2 <  0:
+                if (pi/2) <= theta_1 <= pi : # III
+                    self.theta_p = 2*pi - theta_1
+                elif 0 <= theta_1 < (pi/2):# IV
+                    self.theta_p = 2*pi + theta_2
+        
         self.w = (self.theta_p - self.theta) / DT
-        if self.w != 0:
-            self.v = self.w*(self.x_p - self.x) / (sin(self.theta_p) - sin(self.theta))
-            # self.v = self.w*(self.y_p - self.y) / (cos(self.theta)   - cos(self.theta_p))
-        else:# w == 0, infinity r
-            self.v = self.x_p - self.x
-
+        try: 
+            self.v = self.w * ( (self.x_p - self.x) / (sin(self.theta_p) - sin(self.theta)))
+        except ZeroDivisionError:  
+            self.v = self.w * ( (self.x_p - self.x) / INF_SMALL )
 
 def cal_small_car_position(pose):
     '''
@@ -147,11 +163,13 @@ def marker_feedback_CB(data):
         car_big.w = data.pose.position.y * SLIDER_GAIN
         set_text((-3.5,data.pose.position.y+1) , str(round(car_big.w ,2)) , (255,255,255) , 0.3, 2)
     elif data.marker_name == "Theta1_p":
-        car_1.theta_p = data.pose.position.y * SLIDER_GAIN
-        set_text((-4,data.pose.position.y+1) , str(round(car_1.theta_p ,2)) , (255,255,255) , 0.3, 3)
+        pass 
+        # car_1.theta_p = data.pose.position.y * SLIDER_GAIN
+        # set_text((-4,data.pose.position.y+1) , str(round(car_1.theta_p ,2)) , (255,255,255) , 0.3, 3)
     elif data.marker_name == "Theta2_p":
-        car_2.theta_p = data.pose.position.y * SLIDER_GAIN
-        set_text((-4.5,data.pose.position.y+1) , str(round(car_2.theta_p ,2)) , (255,255,255) , 0.3, 4)
+        pass 
+        # car_2.theta_p = data.pose.position.y * SLIDER_GAIN
+        # set_text((-4.5,data.pose.position.y+1) , str(round(car_2.theta_p ,2)) , (255,255,255) , 0.3, 4)
     
     #--- update car_big ------# 
     car_big.x = (car_1.x+car_2.x)/2
