@@ -40,6 +40,7 @@ L_error = 0
 INIT_VC = 5
 INIT_WC = 5
 SLIDER_GAIN = 1
+
 class Car():
     def __init__(self, id, init_kine): # unique id for every robot 
         self.id = id 
@@ -60,7 +61,7 @@ class Car():
         use x,y,theat  and v,w to calculate x_p, y_p, theta_p
         '''
         try: 
-            r = self.v/self.w # TODO divide by zer o
+            r = self.v/self.w # divide by zero
         except ZeroDivisionError:
             self.w = 0.0000000001
             r = self.v/self.w
@@ -128,7 +129,7 @@ def cal_L_error():
     L_error = L - math.sqrt(dx**2 + dy**2)
     is_global_publish = True 
 
-def marker_feedback_CB(data): # TODO add car_big changing 
+def marker_feedback_CB(data):
     global is_global_publish
     if data.marker_name[:3] == "car":
         quaternion = (
@@ -164,7 +165,7 @@ def marker_feedback_CB(data): # TODO add car_big changing
     car_big.y = (car_1.y+car_2.y)/2
     car_big.theta = atan2(car_2.y-car_1.y, car_2.x-car_1.x)
     car_big.cal_kinematics()
-    
+
     (p1,p2) = cal_small_car_position((car_big.x_p,car_big.y_p,car_big.theta_p))
     #--- update car_1,car_2 ----# 
     (car_1.x_p,car_1.y_p) = p2
@@ -246,7 +247,6 @@ def set_line( points , RGB = None , size = 0.2, id = 0):
         p.x = i[0]
         p.y = i[1]
         marker.points.append(p)
-    # TODO, assign id 
     marker_line.markers.append(marker)
 
 def set_text(point,text , RGB = None  , size = 0.2, id = 0):
@@ -489,7 +489,6 @@ def processFeedback( feedback ):
 #--- Init cars -----# 
 #           id ,x,y,theta,v,w
 car_big =  Car(3, (L/2,0,0,INIT_VC,INIT_WC))
-# TODO theta_p need to be setup
 #           id ,x,y,theta,v,w
 car_1 = Car(1, (0,0,0,0,0))
 car_2 = Car(2, (L,0,0,0,0))
@@ -530,12 +529,8 @@ def main(args):
     
     r = rospy.Rate(30) #call at 30HZ
     # --- init publish markers ---# 
-    # car_1.cal_kinematics()
-    # car_2.cal_kinematics()
 
     p = cal_small_car_position((car_big.x_p,car_big.y_p, car_big.theta_p)) # ((x1,y1),(x2,y2))
-
-    # TODO theta_p need to be setup
 
     (car_1.x_p,car_2.y_p) = p[0]
     car_1.inverse_kinematics()
@@ -552,7 +547,6 @@ def main(args):
     set_text((-3.5,INIT_VC+1) , str(round(car_big.w ,2)) , (255,255,255) , 0.3, 2)
     set_text((-4  ,2) , str(round(car_2.v ,2))   , (255,255,255) , 0.3, 3)
     set_text((-4.5,2) , str(round(car_2.w ,2))   , (255,255,255) , 0.3, 4)
-    # set_text((0,  -1) , "L_error = " + str(round(L_error,3)) , (255,255,255) , 0.3, 5)
     
     server.applyChanges()
 
