@@ -122,13 +122,6 @@ def cal_small_car_position(pose):
     y2 = pose[1] - (L/2)*sin(pose[2])
     return ((x1,y1),(x2,y2))
 
-def cal_L_error():
-    global L_error, is_global_publish
-    dx = car_1.x_p - car_2.x_p
-    dy = car_1.y_p - car_2.y_p
-    L_error = L - math.sqrt(dx**2 + dy**2)
-    is_global_publish = True 
-
 def marker_feedback_CB(data):
     global is_global_publish
     if data.marker_name[:3] == "car":
