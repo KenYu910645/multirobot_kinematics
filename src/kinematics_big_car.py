@@ -172,15 +172,18 @@ class Car():
         self.kinematic_result.pose.orientation.z = q[2]
         self.kinematic_result.pose.orientation.w = q[3]
         # ---- update rotation center -----# 
-        set_sphere((self.x_c,self.y_c), (0,255,255) , 0.2, self.id)
+        # set_sphere((self.x_c,self.y_c), (0,255,255) , 0.2, self.id)
         # ---- update path arc -----#
-        circle_points = []
-        for i in range (NUM_LINE_SEG + 1):
-            t = (DT/NUM_LINE_SEG)*i
-            point = (self.x_c + self.r*sin(self.theta + self.w*t), self.y_c - self.r*cos(self.theta + self.w*t))
-            circle_points.append(point)
-        set_line(circle_points, (255,255,0), 0.02,self.id)
-
+        points = []
+        if self.w <= INF_SMALL: # draw a straight line 
+            points.append( (self.x , self.y) )
+            points.append( (self.x_p , self.y_p) )
+        else: 
+            for i in range (NUM_LINE_SEG + 1):
+                t = (DT/NUM_LINE_SEG)*i
+                point = (self.x_c + self.r*sin(self.theta + self.w*t), self.y_c - self.r*cos(self.theta + self.w*t))
+                points.append(point)
+        modify_line(points, self.id)
         # --Allow main loop to publish markers-- # 
         self.is_need_pub = True
     
@@ -217,18 +220,13 @@ def marker_feedback_CB(data):
     #---- Sliders -----# 
     elif data.marker_name == "Vc":
         car_big.v = data.pose.position.y * SLIDER_GAIN
-        set_text((-3,data.pose.position.y+1) , str(round(car_big.v ,2)) , (255,255,255) , 0.3, 1)
+        marker_text.markers[0].text = str(round(car_big.v ,2))
+        marker_text.markers[0].pose.position.y = data.pose.position.y+1
+
     elif data.marker_name == "Wc":
         car_big.w = data.pose.position.y * SLIDER_GAIN
-        set_text((-3.5,data.pose.position.y+1) , str(round(car_big.w ,2)) , (255,255,255) , 0.3, 2)
-    elif data.marker_name == "Theta1_p":
-        pass 
-        # car_1.theta_p = data.pose.position.y * SLIDER_GAIN
-        # set_text((-4,data.pose.position.y+1) , str(round(car_1.theta_p ,2)) , (255,255,255) , 0.3, 3)
-    elif data.marker_name == "Theta2_p":
-        pass 
-        # car_2.theta_p = data.pose.position.y * SLIDER_GAIN
-        # set_text((-4.5,data.pose.position.y+1) , str(round(car_2.theta_p ,2)) , (255,255,255) , 0.3, 4)
+        marker_text.markers[1].text = str(round(car_big.w ,2))
+        marker_text.markers[1].pose.position.y = data.pose.position.y+1
     
     #--- update car_big ------# 
     car_big.x = (car_1.x+car_2.x)/2
@@ -252,10 +250,10 @@ def marker_feedback_CB(data):
     # car_2.cal_FK()
 
     #--- Update Textes ----# 
-    set_text((0,-1) , "V_car_1 : " + str(round(car_1.v ,2)) , (255,255,255) , 0.3, 10)
-    set_text((0,-1.5) , "W_car_1 : " + str(round(car_1.w ,2)) , (255,255,255) , 0.3, 11)
-    set_text((0,-2) , "V_car_2 : " + str(round(car_2.v ,2)) , (255,255,255) , 0.3, 12)
-    set_text((0,-2.5) , "W_car_2 : " + str(round(car_2.w ,2)) , (255,255,255) , 0.3, 13)
+    marker_text.markers[2].text = "V_car_1 : " + str(round(car_1.v ,2))
+    marker_text.markers[3].text = "W_car_1 : " + str(round(car_1.w ,2))
+    marker_text.markers[4].text = "V_car_2 : " + str(round(car_2.v ,2))
+    marker_text.markers[5].text = "W_car_2 : " + str(round(car_2.w ,2))
     #--- Update markers ----# 
     car_1.update_markers()
     car_2.update_markers()
@@ -564,11 +562,17 @@ def processFeedback( feedback ):
 
 #--- Init cars -----# 
 #           id ,x,y,theta,v,w
-car_big =  Car(3, (L/2,0,0,INIT_VC,INIT_WC))
-#           id ,x,y,theta,v,w
-car_1 = Car(1, (0,0,0,0,0))
-car_2 = Car(2, (L,0,0,0,0))
+car_1   = Car(0, (0,0,0,0,0))
+car_2   = Car(1, (L,0,0,0,0))
+car_big = Car(2, (L/2,0,0,INIT_VC,INIT_WC))
  # v1,w1,v2,w2 need to be init
+def modify_line(points, id):
+    global marker_line
+    ans=[]
+    for i in points : 
+        ans.append(Point(i[0],i[1],0))
+    marker_line.markers[id].points = ans
+
 def main(args):
     global server
     #----- Init node ------# 
@@ -586,22 +590,18 @@ def main(args):
     #------- Interactive Markers ---------# 
     server = InteractiveMarkerServer("basic_controls")
 
-    #------- Markers: two cars -----------# 
+    #------- Markers: Two cars -----------# 
     position = Point(0,0,0)
     make6DofMarker( False, InteractiveMarkerControl.MOVE_ROTATE_3D, position, True , "car_1")
     server.setCallback("car_1", car_1_constriant, InteractiveMarkerFeedback.POSE_UPDATE )
     position = Point( L,0,0)
     make6DofMarker( False, InteractiveMarkerControl.MOVE_ROTATE_3D, position, True , "car_2")
     server.setCallback("car_2", car_2_constriant, InteractiveMarkerFeedback.POSE_UPDATE )
-    #------- Markers: Four sliders -----------# 
+    #------- Markers: Two sliders -----------# 
     position = Point(-3,  INIT_VC/SLIDER_GAIN,0)
     makeYaxisMarker(position, "Vc")
     position = Point(-3.5,INIT_WC/SLIDER_GAIN,0)
     makeYaxisMarker(position, "Wc")
-    position = Point(-4,  1/SLIDER_GAIN,0)
-    makeYaxisMarker(position, "Theta1_p")
-    position = Point(-4.5,1/SLIDER_GAIN,0)
-    makeYaxisMarker(position, "Theta2_p")
     
     r = rospy.Rate(30) #call at 30HZ
     # --- init publish markers ---# 
@@ -617,22 +617,35 @@ def main(args):
     car_1.cal_FK()
     car_2.cal_FK()
     car_big.cal_FK()
-    # TODO how can i move the markers
+
+
     # --- init text markers ---# 
-    set_text((-3  ,INIT_VC+1) , str(round(car_big.v ,2)) , (255,255,255) , 0.3, 1)
-    set_text((-3.5,INIT_VC+1) , str(round(car_big.w ,2)) , (255,255,255) , 0.3, 2)
-    set_text((-4  ,2) , str(round(car_2.v ,2))   , (255,255,255) , 0.3, 3)
-    set_text((-4.5,2) , str(round(car_2.w ,2))   , (255,255,255) , 0.3, 4)
+    set_text((-3  ,INIT_VC+1) , str(round(car_big.v ,2)) , (255,255,255) , 0.3, 0) # Vc slider text
+    set_text((-3.5,INIT_VC+1) , str(round(car_big.w ,2)) , (255,255,255) , 0.3, 1) # Wc slider text
+    set_text((0,-1)   , "V_car_1 : " + str(round(car_1.v ,2)) , (255,255,255) , 0.3, 2)
+    set_text((0,-1.5) , "W_car_1 : " + str(round(car_1.w ,2)) , (255,255,255) , 0.3, 3)
+    set_text((0,-2)   , "V_car_2 : " + str(round(car_2.v ,2)) , (255,255,255) , 0.3, 4)
+    set_text((0,-2.5) , "W_car_2 : " + str(round(car_2.w ,2)) , (255,255,255) , 0.3, 5)
+    #---- init lines ------# 
+    set_line([], (255,255,0), 0.02,0) # car_1# Yellow line for arcs 
+    set_line([], (255,255,0), 0.02,1) # car_2
+    set_line([], (255,255,0), 0.02,2) # car_big
+    p = cal_small_car_position((car_big.x, car_big.y, car_big.theta))
+    set_line([p[0],p[1]],(150,0,0),0.1,3) # REd line 
+    p = cal_small_car_position((car_big.x_p, car_big.y_p, car_big.theta_p))
+    set_line([p[0],p[1]],(255,0,0),0.1,4) # Red line 
     
+    car_1.update_markers()
+    car_2.update_markers()
+    car_big.update_markers()
+
     server.applyChanges()
 
     while (not rospy.is_shutdown()):
         if  car_1.is_need_pub or car_2.is_need_pub or car_big.is_need_pub:
             #---- update car big pose ----# 
-            p = cal_small_car_position((car_big.x, car_big.y, car_big.theta))
-            set_line([p[0],p[1]],(150,0,0),0.1,100)
-            p = cal_small_car_position((car_big.x_p, car_big.y_p, car_big.theta_p))
-            set_line([p[0],p[1]],(255,0,0),0.1,101)
+            modify_line(cal_small_car_position((car_big.x  , car_big.y  , car_big.theta))   ,3)
+            modify_line(cal_small_car_position((car_big.x_p, car_big.y_p, car_big.theta_p)) ,4)
             #---- update car_1 ----# 
             pub_car_1_result.publish(car_1.kinematic_result)
             #---- update car_2 -----# 
