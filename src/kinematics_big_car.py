@@ -23,9 +23,9 @@ from visualization_msgs.msg import *
 
 DT = 0.5 # sec
 BIG_NUM = 100 # A very big number for infinity line drawing 
-NUM_LINE_SEG = 30 # For arc stepping 
-INF_SMALL = 0.0000000001
-EQUALITY_ERROR = 0.000001
+NUM_LINE_SEG =  30 # For arc stepping 
+INF_SMALL = 0.00000001
+EQUALITY_ERROR = 0.00001
 L = 4
 #--- init value -----# 
 INIT_VC = 5
@@ -36,7 +36,6 @@ server = None # For interative markers
 marker_sphere = MarkerArray()
 marker_line   = MarkerArray()
 marker_text   = MarkerArray()
-is_global_publish = True 
 
 class Car():
     def __init__(self, id, init_kine): # unique id for every robot 
@@ -45,6 +44,7 @@ class Car():
         # --Center of rotation-- # 
         self.x_c = 0
         self.y_c = 0
+        self.r = 0
         # --Final position-- # 
         self.x_p = 0
         self.y_p = 0
@@ -53,24 +53,115 @@ class Car():
         #-- Publish ---#
         self.is_need_pub = True
         
-    def cal_kinematics(self):
+    def cal_FK(self):
         '''
-        use x,y,theat  and v,w to calculate x_p, y_p, theta_p
+        calculate forward kinematics
+        Input : 
+            self.x
+            self.y
+            self.theta
+            self.v
+            self.w
+        Output: 
+            self.x_p
+            self.y_p
+            self.theta_p
+            #
+            self.x_c
+            self.y_c
+            self.r
+        '''
+        (self.x_p, self.y_p, self.theta_p, self.x_c, self.y_c ,self.r) = self.cal_FK_passing_paramters(self.x, self.y, self.theta, self.v, self.w)
+
+    def cal_FK_passing_paramters(self, x,y,theta,v,w):
+        '''
+        output (x_p,y_p,theta_p,x_c,y_c)
         '''
         try: 
-            r = self.v/self.w # divide by zero
+            r = v/w # divide by zero
         except ZeroDivisionError:
-            self.w = INF_SMALL
-            r = self.v/self.w
+            w = INF_SMALL
+            r = v/w
         # --- rotation center ----# 
-        self.x_c = self.x - r*sin(self.theta)
-        self.y_c = self.y + r*cos(self.theta)
+        x_c = x - r*sin(theta)
+        y_c = y + r*cos(theta)
         # --- result -----# 
-        self.x_p = self.x_c + r*sin(self.theta + self.w*DT)
-        self.y_p = self.y_c - r*cos(self.theta + self.w*DT)
-        self.theta_p = self.theta + self.w*DT
+        x_p = x_c + r*sin(theta + w*DT)
+        y_p = y_c - r*cos(theta + w*DT)
+        theta_p = theta + w*DT
+        return (x_p,y_p,theta_p,x_c,y_c,r)
 
-        # ----- update kinematics result ------# 
+
+    def cal_IK(self):
+        '''
+        calculate inverse kinematics
+        This should be only called by car_1, car_2
+        Input : 
+            self.x
+            self.y
+            self.theta
+            self.x_p
+            self.y_p
+        Output:
+            self.theta_p
+            self.v
+            self.w
+            self.r
+        '''
+        # TODO : self.x_c self.y_c
+
+        try: 
+            slope = (self.y_p - self.y) / (self.x_p - self.x)
+        except ZeroDivisionError:  
+            slope = (self.y_p - self.y) / INF_SMALL
+        A = sin(self.theta) * slope + cos(self.theta)
+        self.theta_p = acos(1 / sqrt(1+slope**2)) - acos(A / sqrt(1+slope**2))
+        print ("theta_P : " + str(self.theta_p))
+        # theta_2 = asin(A / sqrt(1+slope**2)) - asin(1 / sqrt(1+slope**2))
+        # print ("theta_1 : " + str(theta_1))
+        # print ("theta_2 : " + str(theta_2))
+        '''
+        if (theta_1 - theta_2) < EQUALITY_ERROR : # theta_1 == theta_2 
+            self.theta_p = theta_1 # I
+        else:
+            print ("[QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQq]")
+            if 0 <= theta_2 <= (pi/2):# II
+                self.theta_p = theta_1 
+            elif  -(pi/2) <= theta_2 <  0:
+                if (pi/2) <= theta_1 <= pi : # III
+                    self.theta_p = 2*pi - theta_1
+                elif 0 <= theta_1 < (pi/2):# IV
+                    self.theta_p = 2*pi + theta_2
+        '''
+        for i in range(2):
+            #---- Calculate v,w -----# 
+            self.w = (self.theta_p - self.theta) / DT
+            try: 
+                self.v = self.w * ( (self.x_p - self.x) / (sin(self.theta_p) - sin(self.theta) ))
+            except ZeroDivisionError:
+                self.v = self.w * ( (self.x_p - self.x) / INF_SMALL )
+            #---- Calculate self.r ------# 
+            try: 
+                self.r = self.v/self.w # divide by zero
+            except ZeroDivisionError:
+                self.w = INF_SMALL
+                self.r = self.v/self.w
+            
+            # Temptative cal FK 
+            (x_p,y_p,theta_p,x_c,y_c,r) = self.cal_FK_passing_paramters(self.x,self.y,self.theta,self.v,self.w)
+
+            #
+            if sqrt(self.x_p**2 + self.y_p**2) - sqrt(x_p**2 + y_p**2) > EQUALITY_ERROR: # This is not a solution 
+                self.theta_p = -self.theta_p 
+            else:
+                # print ("[GOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOD]")
+                break
+        
+        # self.cal_FK()
+
+    
+    def update_markers(self):
+        # ----- update kinematics result(Final Pose) ------# 
         self.kinematic_result.header.frame_id = "base_link"
         self.kinematic_result.header.stamp = rospy.get_rostime()
         self.kinematic_result.pose.position.x = self.x_p
@@ -83,47 +174,16 @@ class Car():
         # ---- update rotation center -----# 
         set_sphere((self.x_c,self.y_c), (0,255,255) , 0.2, self.id)
         # ---- update path arc -----#
-        circle_points = [] 
+        circle_points = []
         for i in range (NUM_LINE_SEG + 1):
             t = (DT/NUM_LINE_SEG)*i
-            point = (self.x_c + r*sin(self.theta + self.w*t), self.y_c - r*cos(self.theta + self.w*t))
+            point = (self.x_c + self.r*sin(self.theta + self.w*t), self.y_c - self.r*cos(self.theta + self.w*t))
             circle_points.append(point)
         set_line(circle_points, (255,255,0), 0.02,self.id)
 
         # --Allow main loop to publish markers-- # 
         self.is_need_pub = True
     
-    def inverse_kinematics(self):
-        '''
-        This should be only called by car_1, car_2
-        '''
-        try: 
-            slope = (self.y_p - self.y) / (self.x_p - self.x)
-        except ZeroDivisionError:  
-            slope = (self.y_p - self.y) / INF_SMALL
-        A = sin(self.theta) * slope + cos(self.theta)
-        theta_1 = acos(1 / sqrt(1+slope**2)) - acos(A / sqrt(1+slope**2))
-        theta_2 = asin(A / sqrt(1+slope**2)) - asin(1 / sqrt(1+slope**2))
-        print ("theta_1 : " + str(theta_1))
-        print ("theta_2 : " + str(theta_2))
-        if (theta_1 - theta_2) < EQUALITY_ERROR : # theta_1 == theta_2 
-            self.theta_p = theta_1 # I
-        else:
-            print ("[QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQq]")
-            if 0 <= theta_2 <= (pi/2):# II
-                self.theta_p = theta_1 
-            elif  -(pi/2) <= theta_2 <  0:
-                if (pi/2) <= theta_1 <= pi : # III
-                    self.theta_p = 2*pi - theta_1
-                elif 0 <= theta_1 < (pi/2):# IV
-                    self.theta_p = 2*pi + theta_2
-        
-        self.w = (self.theta_p - self.theta) / DT
-        try: 
-            self.v = self.w * ( (self.x_p - self.x) / (sin(self.theta_p) - sin(self.theta)))
-        except ZeroDivisionError:  
-            self.v = self.w * ( (self.x_p - self.x) / INF_SMALL )
-
 def cal_small_car_position(pose):
     '''
     This should be only called by car_big
@@ -139,7 +199,6 @@ def cal_small_car_position(pose):
     return ((x1,y1),(x2,y2))
 
 def marker_feedback_CB(data):
-    global is_global_publish
     if data.marker_name[:3] == "car":
         quaternion = (
             data.pose.orientation.x,
@@ -175,24 +234,32 @@ def marker_feedback_CB(data):
     car_big.x = (car_1.x+car_2.x)/2
     car_big.y = (car_1.y+car_2.y)/2
     car_big.theta = atan2(car_2.y-car_1.y, car_2.x-car_1.x)
-    car_big.cal_kinematics()
+    car_big.cal_FK()
 
     (p1,p2) = cal_small_car_position((car_big.x_p,car_big.y_p,car_big.theta_p))
     #--- update car_1,car_2 ----# 
     (car_1.x_p,car_1.y_p) = p2
     (car_2.x_p,car_2.y_p) = p1
     #--- inversely calculate v,w ---#
-    car_1.inverse_kinematics()
-    car_2.inverse_kinematics()
+    car_1.cal_IK()
+    car_2.cal_IK()
     print (str(car_1.v) + " , " + str(car_1.w))
     # print (str(car_2.v) + " , " + str(car_2.w))
 
     #--- Keep it consistence ------# 
-    car_1.cal_kinematics()
-    car_2.cal_kinematics()
-    # print (str(car_1.v) + " , " + str(car_1.w))
-    # set_text((0,-1) , "L_error = " + str(round(L_error,3)) , (255,255,255) , 0.3, 5)
-    is_global_publish = True 
+    # TODO cal_IK() might include these
+    # car_1.cal_FK()
+    # car_2.cal_FK()
+
+    #--- Update Textes ----# 
+    set_text((0,-1) , "V_car_1 : " + str(round(car_1.v ,2)) , (255,255,255) , 0.3, 10)
+    set_text((0,-1.5) , "W_car_1 : " + str(round(car_1.w ,2)) , (255,255,255) , 0.3, 11)
+    set_text((0,-2) , "V_car_2 : " + str(round(car_2.v ,2)) , (255,255,255) , 0.3, 12)
+    set_text((0,-2.5) , "W_car_2 : " + str(round(car_2.w ,2)) , (255,255,255) , 0.3, 13)
+    #--- Update markers ----# 
+    car_1.update_markers()
+    car_2.update_markers()
+    car_big.update_markers()
 
 def set_sphere(point , RGB = None  , size = 0.05, id = 0):
     '''
@@ -436,29 +503,27 @@ def makeYaxisMarker(position, name ):
     server.insert(int_marker, processFeedback)
 
 def car_1_constriant( feedback ):
-    global is_global_publish
     pose = feedback.pose
     pose.position.x = 0
     pose.position.y = 0
     car_1.x = 0
     car_1.y = 0
-    car_1.cal_kinematics()
+    car_1.cal_FK()
+    car_1.update_markers()
     server.setPose( feedback.marker_name, pose )
     server.applyChanges()
-    is_global_publish = True 
 
 def car_2_constriant( feedback ):
-    global is_global_publish
     pose = feedback.pose
     yaw = atan2(pose.position.y, pose.position.x)
     pose.position.x = L * cos(yaw)
     pose.position.y = L * sin(yaw)
     car_2.x = L * cos(yaw)
     car_2.y = L * sin(yaw)
-    car_2.cal_kinematics()
+    car_2.cal_FK()
+    car_2.update_markers()
     server.setPose( feedback.marker_name, pose )
     server.applyChanges()
-    is_global_publish = True 
 
 def makeBox( msg ):
     marker = Marker()
@@ -505,7 +570,7 @@ car_1 = Car(1, (0,0,0,0,0))
 car_2 = Car(2, (L,0,0,0,0))
  # v1,w1,v2,w2 need to be init
 def main(args):
-    global is_global_publish, server
+    global server
     #----- Init node ------# 
     rospy.init_node('kinematics', anonymous=True)
     #----- Subscribers ------# 
@@ -544,14 +609,14 @@ def main(args):
     p = cal_small_car_position((car_big.x_p,car_big.y_p, car_big.theta_p)) # ((x1,y1),(x2,y2))
 
     (car_1.x_p,car_2.y_p) = p[0]
-    car_1.inverse_kinematics()
+    car_1.cal_IK()
 
     (car_2.x_p,car_2.y_p) = p[1]
-    car_2.inverse_kinematics()
+    car_2.cal_IK()
     
-    car_1.cal_kinematics()
-    car_2.cal_kinematics()
-    car_big.cal_kinematics()
+    car_1.cal_FK()
+    car_2.cal_FK()
+    car_big.cal_FK()
     # TODO how can i move the markers
     # --- init text markers ---# 
     set_text((-3  ,INIT_VC+1) , str(round(car_big.v ,2)) , (255,255,255) , 0.3, 1)
@@ -562,7 +627,7 @@ def main(args):
     server.applyChanges()
 
     while (not rospy.is_shutdown()):
-        if is_global_publish or car_1.is_need_pub or car_2.is_need_pub or car_big.is_need_pub:
+        if  car_1.is_need_pub or car_2.is_need_pub or car_big.is_need_pub:
             #---- update car big pose ----# 
             p = cal_small_car_position((car_big.x, car_big.y, car_big.theta))
             set_line([p[0],p[1]],(150,0,0),0.1,100)
@@ -583,10 +648,9 @@ def main(args):
             pub_marker_line.publish(marker_line)
 
             #--- Reset flags ------# 
-            is_global_publish = False
-            car_1.is_need_pub  = False 
-            car_2.is_need_pub  = False 
-            car_big.is_need_pub = False 
+            car_1.is_need_pub  = False
+            car_2.is_need_pub  = False
+            car_big.is_need_pub = False
         r.sleep()
 
 if __name__ == '__main__':
