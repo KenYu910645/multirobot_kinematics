@@ -24,7 +24,7 @@ DT = 0.5 # sec
 BIG_NUM = 100 # A very big number for infinity line drawing 
 NUM_LINE_SEG =  30 # For arc stepping 
 INF_SMALL = 0.00000001
-EQUALITY_ERROR = 0.01
+EQUALITY_ERROR = 0.000001
 L = 4
 #--- init value -----# 
 INIT_VC = 5
@@ -40,6 +40,8 @@ def normalize_angle(angle):
     '''
     [-pi, pi]
     '''
+    return angle 
+    '''
     sign = None 
     if angle >= 0:
         sign = 1
@@ -53,7 +55,7 @@ def normalize_angle(angle):
     elif ans > pi: # [pi, 2pi]
         ans -= 2*pi
     return ans
-
+    '''
 class Car():
     def __init__(self, id, init_kine): # unique id for every robot 
         self.id = id 
@@ -126,32 +128,58 @@ class Car():
             self.r
         '''
         # TODO : self.x_c self.y_c
+        A = 2*(self.x_p - self.x)
+        B = 2*(self.y_p - self.y)
+        C = self.x_p**2 + self.y_p**2 - self.x**2 - self.y**2
+        D = cos(self.theta)
+        E = sin(self.theta)
+        F = cos(self.theta) * self.x + sin(self.theta) * self.y
 
+        LHS = np.array([[A,B],[D,E]])
+        RHS = np.array([C,F])
+        try: 
+            (self.x_c, self.y_c) = np.linalg.solve(LHS,RHS)
+        except np.linalg.linalg.LinAlgError:
+            print ("NO SOLUTION!!!!!!!!!!!!!!!!!") 
+
+        self.theta_p = atan2(self.x_c - self.x_p , self.y_p - self.y_c)
+
+        self.w = (self.theta_p - self.theta) / DT
+        try: 
+            self.v = self.w * ( (self.y_p - self.y) / (cos(self.theta) - cos(self.theta_p) ))
+        except ZeroDivisionError:
+            self.v = 0
+        if self.id == 0:
+            print ("x: "   + str(self.x) )
+            print ("y: "   + str(self.y) )
+            print ("x_c: " + str(self.x_c))
+            print ("y-C: " + str(self.y_c))
+        '''
         try: 
             slope = (self.y_p - self.y) / (self.x_p - self.x)
         except ZeroDivisionError:  
-            slope = (self.y_p - self.y) / INF_SMALL
+            # slope = (self.y_p - self.y) / INF_SMALL
+            slope = float('inf')
         A = sin(self.theta) * slope + cos(self.theta)
-        self.theta_p = normalize_angle (acos(1 / sqrt(1+slope**2)) )  - normalize_angle( acos(A / sqrt(1+slope**2)) ) 
-        self.theta_p = normalize_angle(self.theta_p)
-        # print ("theta_P : " + str(self.theta_p))
-        # theta_2 = asin(A / sqrt(1+slope**2)) - asin(1 / sqrt(1+slope**2))
-        # print ("theta_1 : " + str(theta_1))
-        # print ("theta_2 : " + str(theta_2))
-        '''
-        if (theta_1 - theta_2) < EQUALITY_ERROR : # theta_1 == theta_2 
-            self.theta_p = theta_1 # I
-        else:
-            print ("[QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQq]")
-            if 0 <= theta_2 <= (pi/2):# II
-                self.theta_p = theta_1 
-            elif  -(pi/2) <= theta_2 <  0:
-                if (pi/2) <= theta_1 <= pi : # III
-                    self.theta_p = 2*pi - theta_1
-                elif 0 <= theta_1 < (pi/2):# IV
-                    self.theta_p = 2*pi + theta_2
-        '''
+        print ("A : " + str(acos(A / sqrt(1+slope**2))) + "         " "B : "+ str(asin(A / sqrt(1+slope**2))))
+        if self.id == 0 : # Car_1 
+            if self.theta - acos(1 / sqrt(1+slope**2)) >= 0:
+                self.theta_p = acos(1 / sqrt(1+slope**2)) -  acos(A / sqrt(1+slope**2)) 
+            else:
+                self.theta_p = acos(1 / sqrt(1+slope**2)) +  acos(A / sqrt(1+slope**2)) 
+        elif self.id == 1:
+            if self.theta - acos(1 / sqrt(1+slope**2)) >= 0:
+                self.theta_p = acos(1 / sqrt(1+slope**2)) - acos(A / sqrt(1+slope**2)) 
+            else:
+                self.theta_p = acos(1 / sqrt(1+slope**2)) + acos(A / sqrt(1+slope**2)) 
         
+        self.w = ( self.theta_p - self.theta ) / DT
+        try: 
+            self.v = self.w * ( (self.y_p - self.y) / (cos(self.theta) - cos(self.theta_p) ))
+        except ZeroDivisionError:
+            self.v = 0
+        '''
+        '''
         for index in range(2):
             #---- Calculate v,w -----# 
             self.w = ( self.theta_p - self.theta ) / DT
@@ -181,8 +209,8 @@ class Car():
                 else:
                     print ("[WRANING] GG!! Can't get a right position ")
             else:
-                # print ("[GOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOD]")
                 break
+        '''
         # print (self.x_p)
         # TODO WHy self.x_p , self.y_p been change 
         # self.cal_FK()
@@ -200,7 +228,7 @@ class Car():
         self.kinematic_result.pose.orientation.z = q[2]
         self.kinematic_result.pose.orientation.w = q[3]
         # ---- update rotation center -----# 
-        # set_sphere((self.x_c,self.y_c), (0,255,255) , 0.2, self.id)
+        set_sphere((self.x_c,self.y_c), (0,255,255) , 0.2, self.id)
         # ---- update path arc -----#
         points = []
         if abs(self.w) <= INF_SMALL: # draw a straight line
@@ -280,6 +308,10 @@ def marker_feedback_CB(data):
     marker_text.markers[3].text = "W_car_1 : " + str(round(car_1.w ,2))
     marker_text.markers[4].text = "V_car_2 : " + str(round(car_2.v ,2))
     marker_text.markers[5].text = "W_car_2 : " + str(round(car_2.w ,2))
+    marker_text.markers[6].text = "Theta_car_1 : "   + str(round(car_1.theta   ,2))
+    marker_text.markers[7].text = "Theta_P_car_1 : " + str(round(car_1.theta_p ,2))
+    marker_text.markers[8].text = "Theta_car_2 : "   + str(round(car_2.theta   ,2))
+    marker_text.markers[9].text = "Theta_P_car_2 : " + str(round(car_2.theta_p ,2))
     #--- Update markers ----# 
     car_1.update_markers()
     car_2.update_markers()
@@ -655,6 +687,10 @@ def main(args):
     set_text((0,-1.5) , "W_car_1 : " + str(round(car_1.w ,2)) , (255,255,255) , 0.3, 3)
     set_text((0,-2)   , "V_car_2 : " + str(round(car_2.v ,2)) , (255,255,255) , 0.3, 4)
     set_text((0,-2.5) , "W_car_2 : " + str(round(car_2.w ,2)) , (255,255,255) , 0.3, 5)
+    set_text((-3,0)    , "Theta_car_1 : " + str(round(car_1.theta ,2)) , (255,255,255) , 0.3, 6)
+    set_text((-3,-0.5) , "Theta_P_car_1 : " + str(round(car_1.theta_p ,2)) , (255,255,255) , 0.3, 7)
+    set_text((-3,-1)   , "Theta_car_2 : " + str(round(car_2.theta ,2)) , (255,255,255) , 0.3, 8)
+    set_text((-3,-1.5) , "Theta_P_car_2 : " + str(round(car_2.theta_p ,2)) , (255,255,255) , 0.3, 9)
     #---- init lines ------# 
     set_line([], (255,255,0), 0.02,0) # car_1# Yellow line for arcs 
     set_line([], (255,255,0), 0.02,1) # car_2
