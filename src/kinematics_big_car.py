@@ -15,17 +15,16 @@ import cProfile
 import re
 import pstats # for sorting result 
 import random
-
+import numpy as np
 from interactive_markers.interactive_marker_server import *
 from interactive_markers.menu_handler import *
 from visualization_msgs.msg import *
-
 
 DT = 0.5 # sec
 BIG_NUM = 100 # A very big number for infinity line drawing 
 NUM_LINE_SEG =  30 # For arc stepping 
 INF_SMALL = 0.00000001
-EQUALITY_ERROR = 0.00001
+EQUALITY_ERROR = 0.01
 L = 4
 #--- init value -----# 
 INIT_VC = 5
@@ -36,6 +35,24 @@ server = None # For interative markers
 marker_sphere = MarkerArray()
 marker_line   = MarkerArray()
 marker_text   = MarkerArray()
+
+def normalize_angle(angle):
+    '''
+    [-pi, pi]
+    '''
+    sign = None 
+    if angle >= 0:
+        sign = 1
+    else: 
+        sign = -1 
+
+    ans = angle % (pi * sign)
+
+    if ans < -pi: # [-2pi, -pi]
+        ans += 2*pi
+    elif ans > pi: # [pi, 2pi]
+        ans -= 2*pi
+    return ans
 
 class Car():
     def __init__(self, id, init_kine): # unique id for every robot 
@@ -80,17 +97,17 @@ class Car():
         try: 
             r = v/w # divide by zero
         except ZeroDivisionError:
-            w = INF_SMALL
-            r = v/w
+            # w = INF_SMALL
+            # r = v/w
+            r = float('inf')
         # --- rotation center ----# 
         x_c = x - r*sin(theta)
         y_c = y + r*cos(theta)
         # --- result -----# 
         x_p = x_c + r*sin(theta + w*DT)
         y_p = y_c - r*cos(theta + w*DT)
-        theta_p = theta + w*DT
+        theta_p = normalize_angle (theta + w*DT)
         return (x_p,y_p,theta_p,x_c,y_c,r)
-
 
     def cal_IK(self):
         '''
@@ -115,8 +132,9 @@ class Car():
         except ZeroDivisionError:  
             slope = (self.y_p - self.y) / INF_SMALL
         A = sin(self.theta) * slope + cos(self.theta)
-        self.theta_p = acos(1 / sqrt(1+slope**2)) - acos(A / sqrt(1+slope**2))
-        print ("theta_P : " + str(self.theta_p))
+        self.theta_p = normalize_angle (acos(1 / sqrt(1+slope**2)) )  - normalize_angle( acos(A / sqrt(1+slope**2)) ) 
+        self.theta_p = normalize_angle(self.theta_p)
+        # print ("theta_P : " + str(self.theta_p))
         # theta_2 = asin(A / sqrt(1+slope**2)) - asin(1 / sqrt(1+slope**2))
         # print ("theta_1 : " + str(theta_1))
         # print ("theta_2 : " + str(theta_2))
@@ -133,30 +151,40 @@ class Car():
                 elif 0 <= theta_1 < (pi/2):# IV
                     self.theta_p = 2*pi + theta_2
         '''
-        for i in range(2):
+        
+        for index in range(2):
             #---- Calculate v,w -----# 
-            self.w = (self.theta_p - self.theta) / DT
+            self.w = ( self.theta_p - self.theta ) / DT
             try: 
-                self.v = self.w * ( (self.x_p - self.x) / (sin(self.theta_p) - sin(self.theta) ))
+                print ( "theta :"   + str(self.theta))
+                print ( "theta_p :" + str(self.theta_p) )
+                print ( "delta theta :" + str( cos(self.theta) - cos(self.theta_p)) )
+                # self.v = self.w * ( (self.x_p - self.x) / (sin(self.theta_p) - sin(self.theta) ))
+                self.v = self.w * ( (self.y_p - self.y) / (cos(self.theta) - cos(self.theta_p) ))
             except ZeroDivisionError:
-                self.v = self.w * ( (self.x_p - self.x) / INF_SMALL )
+               
+                # self.v = self.w * ( (self.x_p - self.x) / INF_SMALL )
+                self.v = 0
             #---- Calculate self.r ------# 
             try: 
                 self.r = self.v/self.w # divide by zero
             except ZeroDivisionError:
-                self.w = INF_SMALL
-                self.r = self.v/self.w
+                self.r = float('inf')
             
             # Temptative cal FK 
             (x_p,y_p,theta_p,x_c,y_c,r) = self.cal_FK_passing_paramters(self.x,self.y,self.theta,self.v,self.w)
-
-            #
-            if sqrt(self.x_p**2 + self.y_p**2) - sqrt(x_p**2 + y_p**2) > EQUALITY_ERROR: # This is not a solution 
-                self.theta_p = -self.theta_p 
+            
+            if abs( sqrt( (self.x_p - x_p)**2 + (self.y_p - y_p)**2 )) > EQUALITY_ERROR: # This is not a solution 
+                if index == 0 : 
+                    self.theta_p = - self.theta_p  
+                    pass
+                else:
+                    print ("[WRANING] GG!! Can't get a right position ")
             else:
                 # print ("[GOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOD]")
                 break
-        
+        # print (self.x_p)
+        # TODO WHy self.x_p , self.y_p been change 
         # self.cal_FK()
 
     
@@ -175,8 +203,8 @@ class Car():
         # set_sphere((self.x_c,self.y_c), (0,255,255) , 0.2, self.id)
         # ---- update path arc -----#
         points = []
-        if self.w <= INF_SMALL: # draw a straight line 
-            points.append( (self.x , self.y) )
+        if abs(self.w) <= INF_SMALL: # draw a straight line
+            points.append( (self.x   , self.y) )
             points.append( (self.x_p , self.y_p) )
         else: 
             for i in range (NUM_LINE_SEG + 1):
@@ -212,11 +240,11 @@ def marker_feedback_CB(data):
         if data.marker_name == "car_1":
             car_1.x     = data.pose.position.x
             car_1.y     = data.pose.position.y
-            car_1.theta = euler[2]
+            car_1.theta = normalize_angle (euler[2])
         elif data.marker_name == "car_2":
             car_2.x     = data.pose.position.x
             car_2.y     = data.pose.position.y
-            car_2.theta = euler[2]
+            car_2.theta = normalize_angle (euler[2])
     #---- Sliders -----# 
     elif data.marker_name == "Vc":
         car_big.v = data.pose.position.y * SLIDER_GAIN
@@ -231,7 +259,7 @@ def marker_feedback_CB(data):
     #--- update car_big ------# 
     car_big.x = (car_1.x+car_2.x)/2
     car_big.y = (car_1.y+car_2.y)/2
-    car_big.theta = atan2(car_2.y-car_1.y, car_2.x-car_1.x)
+    car_big.theta = normalize_angle (atan2(car_2.y-car_1.y, car_2.x-car_1.x))
     car_big.cal_FK()
 
     (p1,p2) = cal_small_car_position((car_big.x_p,car_big.y_p,car_big.theta_p))
@@ -241,9 +269,7 @@ def marker_feedback_CB(data):
     #--- inversely calculate v,w ---#
     car_1.cal_IK()
     car_2.cal_IK()
-    print (str(car_1.v) + " , " + str(car_1.w))
-    # print (str(car_2.v) + " , " + str(car_2.w))
-
+    
     #--- Keep it consistence ------# 
     # TODO cal_IK() might include these
     # car_1.cal_FK()
@@ -554,11 +580,14 @@ def processFeedback( feedback ):
         mp += " in frame " + feedback.header.frame_id
 
     if feedback.event_type == InteractiveMarkerFeedback.BUTTON_CLICK:
-        rospy.loginfo( s + ": button click" + mp + "." )
+        # rospy.loginfo( s + ": button click" + mp + "." )
+        pass 
     elif feedback.event_type == InteractiveMarkerFeedback.MENU_SELECT:
-        rospy.loginfo( s + ": menu item " + str(feedback.menu_entry_id) + " clicked" + mp + "." )
+        # rospy.loginfo( s + ": menu item " + str(feedback.menu_entry_id) + " clicked" + mp + "." )
+        pass 
     elif feedback.event_type == InteractiveMarkerFeedback.POSE_UPDATE:
-        rospy.loginfo( s + ": pose changed")
+        # rospy.loginfo( s + ": pose changed")
+        pass 
 
 #--- Init cars -----# 
 #           id ,x,y,theta,v,w
