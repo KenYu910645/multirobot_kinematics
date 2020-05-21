@@ -40,8 +40,6 @@ def normalize_angle(angle):
     '''
     [-pi, pi]
     '''
-    return angle 
-    '''
     sign = None 
     if angle >= 0:
         sign = 1
@@ -55,7 +53,7 @@ def normalize_angle(angle):
     elif ans > pi: # [pi, 2pi]
         ans -= 2*pi
     return ans
-    '''
+    
 class Car():
     def __init__(self, id, init_kine): # unique id for every robot 
         self.id = id 
@@ -68,7 +66,8 @@ class Car():
         self.x_p = 0
         self.y_p = 0
         self.theta_p = 0
-        self.kinematic_result = PoseStamped()
+        self.kinematic_current = PoseStamped()
+        self.kinematic_result  = PoseStamped()
         #-- Publish ---#
         self.is_need_pub = True
         
@@ -127,7 +126,6 @@ class Car():
             self.w
             self.r
         '''
-        # TODO : self.x_c self.y_c
         A = 2*(self.x_p - self.x)
         B = 2*(self.y_p - self.y)
         C = self.x_p**2 + self.y_p**2 - self.x**2 - self.y**2
@@ -140,83 +138,39 @@ class Car():
         try: 
             (self.x_c, self.y_c) = np.linalg.solve(LHS,RHS)
         except np.linalg.linalg.LinAlgError:
-            print ("NO SOLUTION!!!!!!!!!!!!!!!!!") 
+            print ("NO SOLUTION!!!!!!!!!!!!!!!!!")
 
-        self.theta_p = atan2(self.x_c - self.x_p , self.y_p - self.y_c)
+        self.theta_p = normalize_angle(atan2(self.x_c - self.x_p , self.y_p - self.y_c))
 
+        self.r = sqrt( (self.x - self.x_c)**2 + (self.y - self.y_c)**2 )
         self.w = (self.theta_p - self.theta) / DT
+        '''
         try: 
             self.v = self.w * ( (self.y_p - self.y) / (cos(self.theta) - cos(self.theta_p) ))
         except ZeroDivisionError:
             self.v = 0
-        if self.id == 0:
-            print ("x: "   + str(self.x) )
-            print ("y: "   + str(self.y) )
-            print ("x_c: " + str(self.x_c))
-            print ("y-C: " + str(self.y_c))
         '''
-        try: 
-            slope = (self.y_p - self.y) / (self.x_p - self.x)
-        except ZeroDivisionError:  
-            # slope = (self.y_p - self.y) / INF_SMALL
-            slope = float('inf')
-        A = sin(self.theta) * slope + cos(self.theta)
-        print ("A : " + str(acos(A / sqrt(1+slope**2))) + "         " "B : "+ str(asin(A / sqrt(1+slope**2))))
-        if self.id == 0 : # Car_1 
-            if self.theta - acos(1 / sqrt(1+slope**2)) >= 0:
-                self.theta_p = acos(1 / sqrt(1+slope**2)) -  acos(A / sqrt(1+slope**2)) 
-            else:
-                self.theta_p = acos(1 / sqrt(1+slope**2)) +  acos(A / sqrt(1+slope**2)) 
-        elif self.id == 1:
-            if self.theta - acos(1 / sqrt(1+slope**2)) >= 0:
-                self.theta_p = acos(1 / sqrt(1+slope**2)) - acos(A / sqrt(1+slope**2)) 
-            else:
-                self.theta_p = acos(1 / sqrt(1+slope**2)) + acos(A / sqrt(1+slope**2)) 
         
-        self.w = ( self.theta_p - self.theta ) / DT
-        try: 
-            self.v = self.w * ( (self.y_p - self.y) / (cos(self.theta) - cos(self.theta_p) ))
-        except ZeroDivisionError:
-            self.v = 0
-        '''
-        '''
-        for index in range(2):
-            #---- Calculate v,w -----# 
-            self.w = ( self.theta_p - self.theta ) / DT
-            try: 
-                print ( "theta :"   + str(self.theta))
-                print ( "theta_p :" + str(self.theta_p) )
-                print ( "delta theta :" + str( cos(self.theta) - cos(self.theta_p)) )
-                # self.v = self.w * ( (self.x_p - self.x) / (sin(self.theta_p) - sin(self.theta) ))
-                self.v = self.w * ( (self.y_p - self.y) / (cos(self.theta) - cos(self.theta_p) ))
-            except ZeroDivisionError:
-               
-                # self.v = self.w * ( (self.x_p - self.x) / INF_SMALL )
-                self.v = 0
-            #---- Calculate self.r ------# 
-            try: 
-                self.r = self.v/self.w # divide by zero
-            except ZeroDivisionError:
-                self.r = float('inf')
-            
-            # Temptative cal FK 
-            (x_p,y_p,theta_p,x_c,y_c,r) = self.cal_FK_passing_paramters(self.x,self.y,self.theta,self.v,self.w)
-            
-            if abs( sqrt( (self.x_p - x_p)**2 + (self.y_p - y_p)**2 )) > EQUALITY_ERROR: # This is not a solution 
-                if index == 0 : 
-                    self.theta_p = - self.theta_p  
-                    pass
-                else:
-                    print ("[WRANING] GG!! Can't get a right position ")
-            else:
-                break
-        '''
-        # print (self.x_p)
-        # TODO WHy self.x_p , self.y_p been change 
+        if self.w != 0:
+            self.v = self.w * self.r 
+        else : 
+            self.v = (self.x_p - self.x) / DT
+        
+        if self.id == 0:
+            print ("self.r: " + str(self.r))
+            print ("self.w: " + str(self.w))
+            print ("self.v: " + str(self.v))
+        
+        #---- Double checking kinematics -----# 
+        (x_p,y_p,theta_p,x_c,y_c,r) = self.cal_FK_passing_paramters(self.x,self.y,self.theta,self.v,self.w)
+        if abs(x_p - self.x_p) > EQUALITY_ERROR or abs(y_p - self.y_p) > EQUALITY_ERROR:
+            print ("GGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG : " + str(abs(x_p - self.x_p) ) )
+
         # self.cal_FK()
 
     
     def update_markers(self):
+        
         # ----- update kinematics result(Final Pose) ------# 
         self.kinematic_result.header.frame_id = "base_link"
         self.kinematic_result.header.stamp = rospy.get_rostime()
@@ -227,9 +181,22 @@ class Car():
         self.kinematic_result.pose.orientation.y = q[1]
         self.kinematic_result.pose.orientation.z = q[2]
         self.kinematic_result.pose.orientation.w = q[3]
+        
+        #------ update kinematics current (init pose) ---# 
+        self.kinematic_current.header.frame_id = "base_link"
+        self.kinematic_current.header.stamp = rospy.get_rostime()
+        self.kinematic_current.pose.position.x = self.x
+        self.kinematic_current.pose.position.y = self.y
+        q = tf.transformations.quaternion_from_euler(0, 0, self.theta)
+        self.kinematic_current.pose.orientation.x = q[0]
+        self.kinematic_current.pose.orientation.y = q[1]
+        self.kinematic_current.pose.orientation.z = q[2]
+        self.kinematic_current.pose.orientation.w = q[3]
+
         # ---- update rotation center -----# 
-        set_sphere((self.x_c,self.y_c), (0,255,255) , 0.2, self.id)
+        modify_sphere((self.x_c,self.y_c), self.id)
         # ---- update path arc -----#
+        
         points = []
         if abs(self.w) <= INF_SMALL: # draw a straight line
             points.append( (self.x   , self.y) )
@@ -240,6 +207,7 @@ class Car():
                 point = (self.x_c + self.r*sin(self.theta + self.w*t), self.y_c - self.r*cos(self.theta + self.w*t))
                 points.append(point)
         modify_line(points, self.id)
+        
         # --Allow main loop to publish markers-- # 
         self.is_need_pub = True
     
@@ -297,11 +265,6 @@ def marker_feedback_CB(data):
     #--- inversely calculate v,w ---#
     car_1.cal_IK()
     car_2.cal_IK()
-    
-    #--- Keep it consistence ------# 
-    # TODO cal_IK() might include these
-    # car_1.cal_FK()
-    # car_2.cal_FK()
 
     #--- Update Textes ----# 
     marker_text.markers[2].text = "V_car_1 : " + str(round(car_1.v ,2))
@@ -321,7 +284,7 @@ def set_sphere(point , RGB = None  , size = 0.05, id = 0):
     '''
     Set Point at MarkArray 
     Input : 
-        point - (x,y) or idx 
+        point - (x,y)
         RGB - (r,g,b)
     '''
     global marker_sphere
@@ -559,27 +522,33 @@ def makeYaxisMarker(position, name ):
     server.insert(int_marker, processFeedback)
 
 def car_1_constriant( feedback ):
+    pass 
+    '''TODO 
     pose = feedback.pose
     pose.position.x = 0
     pose.position.y = 0
     car_1.x = 0
     car_1.y = 0
-    car_1.cal_FK()
-    car_1.update_markers()
+    # car_1.cal_FK() # TODO 
+    # car_1.update_markers()
     server.setPose( feedback.marker_name, pose )
     server.applyChanges()
+    '''
 
 def car_2_constriant( feedback ):
+    pass 
+    '''TODO 
     pose = feedback.pose
     yaw = atan2(pose.position.y, pose.position.x)
     pose.position.x = L * cos(yaw)
     pose.position.y = L * sin(yaw)
     car_2.x = L * cos(yaw)
     car_2.y = L * sin(yaw)
-    car_2.cal_FK()
-    car_2.update_markers()
+    # car_2.cal_FK() TODO 
+    # car_2.update_markers()
     server.setPose( feedback.marker_name, pose )
     server.applyChanges()
+    '''
 
 def makeBox( msg ):
     marker = Marker()
@@ -634,6 +603,15 @@ def modify_line(points, id):
         ans.append(Point(i[0],i[1],0))
     marker_line.markers[id].points = ans
 
+def modify_sphere(point, id):
+    '''
+    Input:
+        point: (x,y)
+    '''
+    global marker_sphere
+    marker_sphere.markers[id].pose.position.x = point[0]
+    marker_sphere.markers[id].pose.position.y = point[1]
+
 def main(args):
     global server
     #----- Init node ------# 
@@ -643,7 +621,10 @@ def main(args):
     #----- Publisher -------# 
     pub_car_1_result    = rospy.Publisher('car_1_result'  , PoseStamped ,queue_size = 10,  latch=False)
     pub_car_2_result    = rospy.Publisher('car_2_result'  , PoseStamped ,queue_size = 10,  latch=False)
-    pub_car_bug_result  = rospy.Publisher('car_big_result', PoseStamped ,queue_size = 10,  latch=False)
+    pub_car_big_result  = rospy.Publisher('car_big_result', PoseStamped ,queue_size = 10,  latch=False)
+    pub_car_1_current    = rospy.Publisher('car_1_current'  , PoseStamped ,queue_size = 10,  latch=False)
+    pub_car_2_current    = rospy.Publisher('car_2_current'  , PoseStamped ,queue_size = 10,  latch=False)
+    pub_car_big_current  = rospy.Publisher('car_big_current', PoseStamped ,queue_size = 10,  latch=False)
     #--   publish marker --# 
     pub_marker_sphere     = rospy.Publisher('marker_sphere', MarkerArray,queue_size = 1,latch=True)
     pub_marker_line       = rospy.Publisher('marker_line'  , MarkerArray,queue_size = 1,latch=True)
@@ -691,15 +672,19 @@ def main(args):
     set_text((-3,-0.5) , "Theta_P_car_1 : " + str(round(car_1.theta_p ,2)) , (255,255,255) , 0.3, 7)
     set_text((-3,-1)   , "Theta_car_2 : " + str(round(car_2.theta ,2)) , (255,255,255) , 0.3, 8)
     set_text((-3,-1.5) , "Theta_P_car_2 : " + str(round(car_2.theta_p ,2)) , (255,255,255) , 0.3, 9)
-    #---- init lines ------# 
-    set_line([], (255,255,0), 0.02,0) # car_1# Yellow line for arcs 
+    #---- init lines ------# Yellow line for arcs 
+    set_line([], (255,255,0), 0.02,0) # car_1 
     set_line([], (255,255,0), 0.02,1) # car_2
     set_line([], (255,255,0), 0.02,2) # car_big
     p = cal_small_car_position((car_big.x, car_big.y, car_big.theta))
     set_line([p[0],p[1]],(150,0,0),0.1,3) # REd line 
     p = cal_small_car_position((car_big.x_p, car_big.y_p, car_big.theta_p))
     set_line([p[0],p[1]],(255,0,0),0.1,4) # Red line 
-    
+    #---- init spheres -----# 
+    set_sphere((car_1.x_c,car_1.y_c),     (0,255,255) , 0.2, 0)
+    set_sphere((car_2.x_c,car_2.y_c),     (0,255,255) , 0.2, 1)
+    set_sphere((car_big.x_c,car_big.y_c), (0,255,255) , 0.2, 2)
+
     car_1.update_markers()
     car_2.update_markers()
     car_big.update_markers()
@@ -713,10 +698,13 @@ def main(args):
             modify_line(cal_small_car_position((car_big.x_p, car_big.y_p, car_big.theta_p)) ,4)
             #---- update car_1 ----# 
             pub_car_1_result.publish(car_1.kinematic_result)
+            pub_car_1_current.publish(car_1.kinematic_current)
             #---- update car_2 -----# 
             pub_car_2_result.publish(car_2.kinematic_result)
+            pub_car_2_current.publish(car_2.kinematic_current)
             #----- update car_big ----# 
-            pub_car_bug_result.publish(car_big.kinematic_result)
+            pub_car_big_result.publish(car_big.kinematic_result)
+            pub_car_big_current.publish(car_big.kinematic_current)
 
             #---- update Textes -----# 
             pub_marker_text.publish(marker_text)
