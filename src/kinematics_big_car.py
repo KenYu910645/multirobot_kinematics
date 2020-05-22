@@ -46,7 +46,7 @@ def normalize_angle(angle):
     else: 
         sign = -1 
 
-    ans = angle % (pi * sign)
+    ans = angle % (2* pi * sign)
 
     if ans < -pi: # [-2pi, -pi]
         ans += 2*pi
@@ -139,34 +139,35 @@ class Car():
             (self.x_c, self.y_c) = np.linalg.solve(LHS,RHS)
         except np.linalg.linalg.LinAlgError:
             print ("NO SOLUTION!!!!!!!!!!!!!!!!!")
-
-        self.theta_p = normalize_angle(atan2(self.x_c - self.x_p , self.y_p - self.y_c))
-
-        self.r = sqrt( (self.x - self.x_c)**2 + (self.y - self.y_c)**2 )
-        self.w = (self.theta_p - self.theta) / DT
-        '''
-        try: 
-            self.v = self.w * ( (self.y_p - self.y) / (cos(self.theta) - cos(self.theta_p) ))
-        except ZeroDivisionError:
-            self.v = 0
-        '''
         
+        self.r = sqrt( (self.x - self.x_c)**2 + (self.y - self.y_c)**2 )
+        
+        self.theta_p = normalize_angle(atan2(self.x_c - self.x_p , self.y_p - self.y_c))
+        #---- theta_p has a constraint that direction must be the same as the votex -----# 
+        v_s = np.cross( [ self.x - self.x_c , self.y - self.y_c ,0 ]   , [ cos(self.theta) , sin(self.theta),0] )
+        v_e = np.cross( [ self.x_p - self.x_c , self.y_p - self.y_c,0] , [ cos(self.theta_p) , sin(self.theta_p),0] )
+        if v_s[2] * v_e [2] < 0: # different sign 
+            self.theta_p = normalize_angle(self.theta_p + pi) # Switch the direction 
+        
+        #---- Go forward of Go backward ? ----#
+        '''
+        dtheta = normalize_angle(self.theta_p - self.theta)
+        if   dtheta > pi :
+            self.w = (self.theta_p - self.theta - 2*pi) / DT
+        elif dtheta < -pi :
+            self.w = (self.theta_p - self.theta + 2*pi) / DT
+        '''
+        self.w = (self.theta_p - self.theta) / DT
+
         if self.w != 0:
             self.v = self.w * self.r 
         else : 
             self.v = (self.x_p - self.x) / DT
-        
+
         if self.id == 0:
             print ("self.r: " + str(self.r))
             print ("self.w: " + str(self.w))
             print ("self.v: " + str(self.v))
-        
-        #---- Double checking kinematics -----# 
-        (x_p,y_p,theta_p,x_c,y_c,r) = self.cal_FK_passing_paramters(self.x,self.y,self.theta,self.v,self.w)
-        if abs(x_p - self.x_p) > EQUALITY_ERROR or abs(y_p - self.y_p) > EQUALITY_ERROR:
-            print ("GGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG : " + str(abs(x_p - self.x_p) ) )
-
-        # self.cal_FK()
 
     
     def update_markers(self):
@@ -202,10 +203,13 @@ class Car():
             points.append( (self.x   , self.y) )
             points.append( (self.x_p , self.y_p) )
         else: 
+            theta_start = atan2( (self.y   - self.y_c) ,(self.x   - self.x_c) )
+            theta_end   = atan2( (self.y_p - self.y_c) ,(self.x_p - self.x_c) )
             for i in range (NUM_LINE_SEG + 1):
                 t = (DT/NUM_LINE_SEG)*i
-                point = (self.x_c + self.r*sin(self.theta + self.w*t), self.y_c - self.r*cos(self.theta + self.w*t))
+                point = (self.x_c + self.r*cos(theta_start + self.w*t), self.y_c + self.r*sin(theta_start + self.w*t))
                 points.append(point)
+            
         modify_line(points, self.id)
         
         # --Allow main loop to publish markers-- # 
@@ -234,13 +238,33 @@ def marker_feedback_CB(data):
             data.pose.orientation.w)
         euler = transformations.euler_from_quaternion(quaternion)
         if data.marker_name == "car_1":
-            car_1.x     = data.pose.position.x
-            car_1.y     = data.pose.position.y
-            car_1.theta = normalize_angle (euler[2])
+            if data.pose.position.x != 0 or data.pose.position.y != 0: 
+                data.pose.position.x = 0
+                data.pose.position.y = 0
+                car_1.x = 0
+                car_1.y = 0
+                car_1.theta = normalize_angle (euler[2])
+                server.setPose( data.marker_name, data.pose )
+                server.applyChanges()
+            else: 
+                car_1.x     = data.pose.position.x
+                car_1.y     = data.pose.position.y
+                car_1.theta = normalize_angle (euler[2])
+
         elif data.marker_name == "car_2":
-            car_2.x     = data.pose.position.x
-            car_2.y     = data.pose.position.y
-            car_2.theta = normalize_angle (euler[2])
+            yaw = atan2(data.pose.position.y, data.pose.position.x)
+            if data.pose.position.x != L * cos(yaw) or data.pose.position.y != L * sin(yaw):
+                data.pose.position.x = L * cos(yaw)
+                data.pose.position.y = L * sin(yaw)
+                car_2.x = L * cos(yaw)
+                car_2.y = L * sin(yaw)
+                car_2.theta = normalize_angle (euler[2])
+                server.setPose( data.marker_name, data.pose )
+                server.applyChanges()
+            else: 
+                car_2.x     = data.pose.position.x
+                car_2.y     = data.pose.position.y
+                car_2.theta = normalize_angle (euler[2])
     #---- Sliders -----# 
     elif data.marker_name == "Vc":
         car_big.v = data.pose.position.y * SLIDER_GAIN
@@ -412,28 +436,6 @@ def make6DofMarker( fixed, interaction_mode, position, show_6dof = False, name="
     if show_6dof: 
         control = InteractiveMarkerControl()
         control.orientation.w = 1
-        control.orientation.x = 1
-        control.orientation.y = 0
-        control.orientation.z = 0
-        control.name = "rotate_x"
-        control.interaction_mode = InteractiveMarkerControl.ROTATE_AXIS
-        if fixed:
-            control.orientation_mode = InteractiveMarkerControl.FIXED
-        int_marker.controls.append(control)
-
-        control = InteractiveMarkerControl()
-        control.orientation.w = 1
-        control.orientation.x = 1
-        control.orientation.y = 0
-        control.orientation.z = 0
-        control.name = "move_x"
-        control.interaction_mode = InteractiveMarkerControl.MOVE_AXIS
-        if fixed:
-            control.orientation_mode = InteractiveMarkerControl.FIXED
-        int_marker.controls.append(control)
-
-        control = InteractiveMarkerControl()
-        control.orientation.w = 1
         control.orientation.x = 0
         control.orientation.y = 1
         control.orientation.z = 0
@@ -442,40 +444,6 @@ def make6DofMarker( fixed, interaction_mode, position, show_6dof = False, name="
         if fixed:
             control.orientation_mode = InteractiveMarkerControl.FIXED
         int_marker.controls.append(control)
-
-        control = InteractiveMarkerControl()
-        control.orientation.w = 1
-        control.orientation.x = 0
-        control.orientation.y = 1
-        control.orientation.z = 0
-        control.name = "move_z"
-        control.interaction_mode = InteractiveMarkerControl.MOVE_AXIS
-        if fixed:
-            control.orientation_mode = InteractiveMarkerControl.FIXED
-        int_marker.controls.append(control)
-
-        control = InteractiveMarkerControl()
-        control.orientation.w = 1
-        control.orientation.x = 0
-        control.orientation.y = 0
-        control.orientation.z = 1
-        control.name = "rotate_y"
-        control.interaction_mode = InteractiveMarkerControl.ROTATE_AXIS
-        if fixed:
-            control.orientation_mode = InteractiveMarkerControl.FIXED
-        int_marker.controls.append(control)
-
-        control = InteractiveMarkerControl()
-        control.orientation.w = 1
-        control.orientation.x = 0
-        control.orientation.y = 0
-        control.orientation.z = 1
-        control.name = "move_y"
-        control.interaction_mode = InteractiveMarkerControl.MOVE_AXIS
-        if fixed:
-            control.orientation_mode = InteractiveMarkerControl.FIXED
-        int_marker.controls.append(control)
-    
     server.insert(int_marker, processFeedback)
     # menu_handler.apply( server, int_marker.name )
 
@@ -522,33 +490,31 @@ def makeYaxisMarker(position, name ):
     server.insert(int_marker, processFeedback)
 
 def car_1_constriant( feedback ):
-    pass 
-    '''TODO 
     pose = feedback.pose
-    pose.position.x = 0
-    pose.position.y = 0
-    car_1.x = 0
-    car_1.y = 0
-    # car_1.cal_FK() # TODO 
-    # car_1.update_markers()
-    server.setPose( feedback.marker_name, pose )
-    server.applyChanges()
-    '''
+    if pose.position.x != 0 or pose.position.y != 0: 
+        pose.position.x = 0
+        pose.position.y = 0
+        car_1.x = 0
+        car_1.y = 0
+        car_1.cal_IK()  
+        car_1.update_markers()
+        server.setPose( feedback.marker_name, pose )
+        server.applyChanges()
+    
 
 def car_2_constriant( feedback ):
-    pass 
-    '''TODO 
     pose = feedback.pose
     yaw = atan2(pose.position.y, pose.position.x)
-    pose.position.x = L * cos(yaw)
-    pose.position.y = L * sin(yaw)
-    car_2.x = L * cos(yaw)
-    car_2.y = L * sin(yaw)
-    # car_2.cal_FK() TODO 
-    # car_2.update_markers()
-    server.setPose( feedback.marker_name, pose )
-    server.applyChanges()
-    '''
+    if pose.position.x != L * cos(yaw) or pose.position.y != L * sin(yaw):
+        pose.position.x = L * cos(yaw)
+        pose.position.y = L * sin(yaw)
+        car_2.x = L * cos(yaw)
+        car_2.y = L * sin(yaw)
+        car_2.cal_FK() 
+        car_2.update_markers()
+        server.setPose( feedback.marker_name, pose )
+        server.applyChanges()
+    
 
 def makeBox( msg ):
     marker = Marker()
@@ -634,11 +600,11 @@ def main(args):
 
     #------- Markers: Two cars -----------# 
     position = Point(0,0,0)
-    make6DofMarker( False, InteractiveMarkerControl.MOVE_ROTATE_3D, position, True , "car_1")
-    server.setCallback("car_1", car_1_constriant, InteractiveMarkerFeedback.POSE_UPDATE )
+    make6DofMarker( False , InteractiveMarkerControl.MOVE_ROTATE_3D, position, True , "car_1")
+    # server.setCallback("car_1", car_1_constriant, InteractiveMarkerFeedback.POSE_UPDATE )
     position = Point( L,0,0)
     make6DofMarker( False, InteractiveMarkerControl.MOVE_ROTATE_3D, position, True , "car_2")
-    server.setCallback("car_2", car_2_constriant, InteractiveMarkerFeedback.POSE_UPDATE )
+    # server.setCallback("car_2", car_2_constriant, InteractiveMarkerFeedback.POSE_UPDATE )
     #------- Markers: Two sliders -----------# 
     position = Point(-3,  INIT_VC/SLIDER_GAIN,0)
     makeYaxisMarker(position, "Vc")
@@ -721,6 +687,6 @@ def main(args):
 
 if __name__ == '__main__':
     try:
-        main(sys.argv)
+       main(sys.argv)
     except rospy.ROSInterruptException:
         pass
