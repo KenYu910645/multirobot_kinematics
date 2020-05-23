@@ -36,6 +36,9 @@ marker_sphere = MarkerArray()
 marker_line   = MarkerArray()
 marker_text   = MarkerArray()
 
+############################
+###   Utility Function   ###
+############################
 def normalize_angle(angle):
     '''
     [-pi, pi]
@@ -53,7 +56,21 @@ def normalize_angle(angle):
     elif ans > pi: # [pi, 2pi]
         ans -= 2*pi
     return ans
-    
+
+def cal_small_car_position(pose):
+    '''
+    This should be only called by car_big
+    Input : 
+        pose = (x,y,theta)
+    Output: 
+        [(x1,y1),(x2,y2)]
+    '''
+    x1 = pose[0] + (L/2)*cos(pose[2])
+    y1 = pose[1] + (L/2)*sin(pose[2])
+    x2 = pose[0] - (L/2)*cos(pose[2])
+    y2 = pose[1] - (L/2)*sin(pose[2])
+    return ((x1,y1),(x2,y2))
+
 class Car():
     def __init__(self, id, init_kine): # unique id for every robot 
         self.id = id 
@@ -169,7 +186,6 @@ class Car():
             print ("self.w: " + str(self.w))
             print ("self.v: " + str(self.v))
 
-    
     def update_markers(self):
         
         # ----- update kinematics result(Final Pose) ------# 
@@ -214,95 +230,17 @@ class Car():
         
         # --Allow main loop to publish markers-- # 
         self.is_need_pub = True
-    
-def cal_small_car_position(pose):
-    '''
-    This should be only called by car_big
-    Input : 
-        pose = (x,y,theta)
-    Output: 
-        [(x1,y1),(x2,y2)]
-    '''
-    x1 = pose[0] + (L/2)*cos(pose[2])
-    y1 = pose[1] + (L/2)*sin(pose[2])
-    x2 = pose[0] - (L/2)*cos(pose[2])
-    y2 = pose[1] - (L/2)*sin(pose[2])
-    return ((x1,y1),(x2,y2))
 
-def marker_feedback_CB(data):
-    if data.marker_name[:3] == "car":
-        quaternion = (
-            data.pose.orientation.x,
-            data.pose.orientation.y,
-            data.pose.orientation.z,
-            data.pose.orientation.w)
-        euler = transformations.euler_from_quaternion(quaternion)
-        if data.marker_name == "car_1":
-            if data.pose.position.x != 0 or data.pose.position.y != 0: 
-                data.pose.position.x = 0
-                data.pose.position.y = 0
-                car_1.x = 0
-                car_1.y = 0
-                car_1.theta = normalize_angle (euler[2])
-                server.setPose( data.marker_name, data.pose )
-                server.applyChanges()
-            else: 
-                car_1.x     = data.pose.position.x
-                car_1.y     = data.pose.position.y
-                car_1.theta = normalize_angle (euler[2])
+#--- Init cars -----# 
+#           id ,x,y,theta,v,w
+car_1   = Car(0, (0,0,0,0,0))
+car_2   = Car(1, (L,0,0,0,0))
+car_big = Car(2, (L/2,0,0,INIT_VC,INIT_WC))
 
-        elif data.marker_name == "car_2":
-            yaw = atan2(data.pose.position.y, data.pose.position.x)
-            if data.pose.position.x != L * cos(yaw) or data.pose.position.y != L * sin(yaw):
-                data.pose.position.x = L * cos(yaw)
-                data.pose.position.y = L * sin(yaw)
-                car_2.x = L * cos(yaw)
-                car_2.y = L * sin(yaw)
-                car_2.theta = normalize_angle (euler[2])
-                server.setPose( data.marker_name, data.pose )
-                server.applyChanges()
-            else: 
-                car_2.x     = data.pose.position.x
-                car_2.y     = data.pose.position.y
-                car_2.theta = normalize_angle (euler[2])
-    #---- Sliders -----# 
-    elif data.marker_name == "Vc":
-        car_big.v = data.pose.position.y * SLIDER_GAIN
-        marker_text.markers[0].text = str(round(car_big.v ,2))
-        marker_text.markers[0].pose.position.y = data.pose.position.y+1
 
-    elif data.marker_name == "Wc":
-        car_big.w = data.pose.position.y * SLIDER_GAIN
-        marker_text.markers[1].text = str(round(car_big.w ,2))
-        marker_text.markers[1].pose.position.y = data.pose.position.y+1
-    
-    #--- update car_big ------# 
-    car_big.x = (car_1.x+car_2.x)/2
-    car_big.y = (car_1.y+car_2.y)/2
-    car_big.theta = normalize_angle (atan2(car_2.y-car_1.y, car_2.x-car_1.x))
-    car_big.cal_FK()
-
-    (p1,p2) = cal_small_car_position((car_big.x_p,car_big.y_p,car_big.theta_p))
-    #--- update car_1,car_2 ----# 
-    (car_1.x_p,car_1.y_p) = p2
-    (car_2.x_p,car_2.y_p) = p1
-    #--- inversely calculate v,w ---#
-    car_1.cal_IK()
-    car_2.cal_IK()
-
-    #--- Update Textes ----# 
-    marker_text.markers[2].text = "V_car_1 : " + str(round(car_1.v ,2))
-    marker_text.markers[3].text = "W_car_1 : " + str(round(car_1.w ,2))
-    marker_text.markers[4].text = "V_car_2 : " + str(round(car_2.v ,2))
-    marker_text.markers[5].text = "W_car_2 : " + str(round(car_2.w ,2))
-    marker_text.markers[6].text = "Theta_car_1 : "   + str(round(car_1.theta   ,2))
-    marker_text.markers[7].text = "Theta_P_car_1 : " + str(round(car_1.theta_p ,2))
-    marker_text.markers[8].text = "Theta_car_2 : "   + str(round(car_2.theta   ,2))
-    marker_text.markers[9].text = "Theta_P_car_2 : " + str(round(car_2.theta_p ,2))
-    #--- Update markers ----# 
-    car_1.update_markers()
-    car_2.update_markers()
-    car_big.update_markers()
+#############################
+###  Marker Initialize    ###
+#############################
 
 def set_sphere(point , RGB = None  , size = 0.05, id = 0):
     '''
@@ -401,7 +339,28 @@ def set_text(point,text , RGB = None  , size = 0.2, id = 0):
     marker.pose.orientation.w = 1.0
     (marker.pose.position.x , marker.pose.position.y) = point
     marker_text.markers.append(marker)
+###############################
+###  Marker Modification    ###
+###############################
 
+def modify_line(points, id):
+    global marker_line
+    ans=[]
+    for i in points : 
+        ans.append(Point(i[0],i[1],0))
+    marker_line.markers[id].points = ans
+
+def modify_sphere(point, id):
+    '''
+    Input:
+        point: (x,y)
+    '''
+    global marker_sphere
+    marker_sphere.markers[id].pose.position.x = point[0]
+    marker_sphere.markers[id].pose.position.y = point[1]
+###########################################
+###  Interactive Marker Modification    ###
+###########################################
 def make6DofMarker( fixed, interaction_mode, position, show_6dof = False, name="marker"):
     int_marker = InteractiveMarker()
     int_marker.header.frame_id = "base_link"
@@ -444,7 +403,7 @@ def make6DofMarker( fixed, interaction_mode, position, show_6dof = False, name="
         if fixed:
             control.orientation_mode = InteractiveMarkerControl.FIXED
         int_marker.controls.append(control)
-    server.insert(int_marker, processFeedback)
+    server.insert(int_marker, marker_feedback_CB)
     # menu_handler.apply( server, int_marker.name )
 
 def makeYaxisMarker(position, name ):
@@ -487,34 +446,7 @@ def makeYaxisMarker(position, name ):
 
     # add the interactive marker to our collection &
     # tell the server to call processFeedback() when feedback arrives for it
-    server.insert(int_marker, processFeedback)
-
-def car_1_constriant( feedback ):
-    pose = feedback.pose
-    if pose.position.x != 0 or pose.position.y != 0: 
-        pose.position.x = 0
-        pose.position.y = 0
-        car_1.x = 0
-        car_1.y = 0
-        car_1.cal_IK()  
-        car_1.update_markers()
-        server.setPose( feedback.marker_name, pose )
-        server.applyChanges()
-    
-
-def car_2_constriant( feedback ):
-    pose = feedback.pose
-    yaw = atan2(pose.position.y, pose.position.x)
-    if pose.position.x != L * cos(yaw) or pose.position.y != L * sin(yaw):
-        pose.position.x = L * cos(yaw)
-        pose.position.y = L * sin(yaw)
-        car_2.x = L * cos(yaw)
-        car_2.y = L * sin(yaw)
-        car_2.cal_FK() 
-        car_2.update_markers()
-        server.setPose( feedback.marker_name, pose )
-        server.applyChanges()
-    
+    server.insert(int_marker, marker_feedback_CB)
 
 def makeBox( msg ):
     marker = Marker()
@@ -534,63 +466,95 @@ def makeBoxControl( msg ):
     control.markers.append( makeBox(msg) )
     msg.controls.append( control )
     return control
+#############################
+###  Marker CB Function   ###
+#############################
+def marker_feedback_CB(data):
+    if data.marker_name[:3] == "car":
+        quaternion = (
+            data.pose.orientation.x,
+            data.pose.orientation.y,
+            data.pose.orientation.z,
+            data.pose.orientation.w)
+        euler = transformations.euler_from_quaternion(quaternion)
+        if data.marker_name == "car_1":
+            if data.pose.position.x != 0 or data.pose.position.y != 0: 
+                data.pose.position.x = 0
+                data.pose.position.y = 0
+                car_1.x = 0
+                car_1.y = 0
+                car_1.theta = normalize_angle (euler[2])
+                server.setPose( data.marker_name, data.pose )
+            else: 
+                car_1.x     = data.pose.position.x
+                car_1.y     = data.pose.position.y
+                car_1.theta = normalize_angle (euler[2])
 
-def processFeedback( feedback ):
-    s = "Feedback from marker '" + feedback.marker_name
-    s += "' / control '" + feedback.control_name + "'"
+        elif data.marker_name == "car_2":
+            yaw = atan2(data.pose.position.y, data.pose.position.x)
+            if data.pose.position.x != L * cos(yaw) or data.pose.position.y != L * sin(yaw):
+                data.pose.position.x = L * cos(yaw)
+                data.pose.position.y = L * sin(yaw)
+                car_2.x = L * cos(yaw)
+                car_2.y = L * sin(yaw)
+                car_2.theta = normalize_angle (euler[2])
+                server.setPose( data.marker_name, data.pose )
+            else: 
+                car_2.x     = data.pose.position.x
+                car_2.y     = data.pose.position.y
+                car_2.theta = normalize_angle (euler[2])
+    #---- Sliders -----# 
+    elif data.marker_name == "Vc":
+        car_big.v = data.pose.position.y * SLIDER_GAIN
+        marker_text.markers[0].text = str(round(car_big.v ,2))
+        marker_text.markers[0].pose.position.y = data.pose.position.y+1
 
-    mp = ""
-    if feedback.mouse_point_valid:
-        mp = " at " + str(feedback.mouse_point.x)
-        mp += ", " + str(feedback.mouse_point.y)
-        mp += ", " + str(feedback.mouse_point.z)
-        mp += " in frame " + feedback.header.frame_id
+    elif data.marker_name == "Wc":
+        car_big.w = data.pose.position.y * SLIDER_GAIN
+        marker_text.markers[1].text = str(round(car_big.w ,2))
+        marker_text.markers[1].pose.position.y = data.pose.position.y+1
+    
+    #--- update car_big ------# 
+    car_big.x = (car_1.x+car_2.x)/2
+    car_big.y = (car_1.y+car_2.y)/2
+    car_big.theta = normalize_angle (atan2(car_2.y-car_1.y, car_2.x-car_1.x))
+    car_big.cal_FK()
 
-    if feedback.event_type == InteractiveMarkerFeedback.BUTTON_CLICK:
-        # rospy.loginfo( s + ": button click" + mp + "." )
-        pass 
-    elif feedback.event_type == InteractiveMarkerFeedback.MENU_SELECT:
-        # rospy.loginfo( s + ": menu item " + str(feedback.menu_entry_id) + " clicked" + mp + "." )
-        pass 
-    elif feedback.event_type == InteractiveMarkerFeedback.POSE_UPDATE:
-        # rospy.loginfo( s + ": pose changed")
-        pass 
+    (p1,p2) = cal_small_car_position((car_big.x_p,car_big.y_p,car_big.theta_p))
+    #--- update car_1,car_2 ----# 
+    (car_1.x_p,car_1.y_p) = p2
+    (car_2.x_p,car_2.y_p) = p1
+    #--- inversely calculate v,w ---#
+    car_1.cal_IK()
+    car_2.cal_IK()
 
-#--- Init cars -----# 
-#           id ,x,y,theta,v,w
-car_1   = Car(0, (0,0,0,0,0))
-car_2   = Car(1, (L,0,0,0,0))
-car_big = Car(2, (L/2,0,0,INIT_VC,INIT_WC))
- # v1,w1,v2,w2 need to be init
-def modify_line(points, id):
-    global marker_line
-    ans=[]
-    for i in points : 
-        ans.append(Point(i[0],i[1],0))
-    marker_line.markers[id].points = ans
-
-def modify_sphere(point, id):
-    '''
-    Input:
-        point: (x,y)
-    '''
-    global marker_sphere
-    marker_sphere.markers[id].pose.position.x = point[0]
-    marker_sphere.markers[id].pose.position.y = point[1]
+    #--- Update Textes ----# 
+    marker_text.markers[2].text = "V_car_1 : " + str(round(car_1.v ,2))
+    marker_text.markers[3].text = "W_car_1 : " + str(round(car_1.w ,2))
+    marker_text.markers[4].text = "V_car_2 : " + str(round(car_2.v ,2))
+    marker_text.markers[5].text = "W_car_2 : " + str(round(car_2.w ,2))
+    marker_text.markers[6].text = "Theta_car_1 : "   + str(round(car_1.theta   ,2))
+    marker_text.markers[7].text = "Theta_P_car_1 : " + str(round(car_1.theta_p ,2))
+    marker_text.markers[8].text = "Theta_car_2 : "   + str(round(car_2.theta   ,2))
+    marker_text.markers[9].text = "Theta_P_car_2 : " + str(round(car_2.theta_p ,2))
+    #--- Update markers ----# 
+    car_1.update_markers()
+    car_2.update_markers()
+    car_big.update_markers()
+    #--- Server change ----# 
+    server.applyChanges()
 
 def main(args):
     global server
     #----- Init node ------# 
     rospy.init_node('kinematics', anonymous=True)
-    #----- Subscribers ------# 
-    rospy.Subscriber('/basic_controls/feedback', InteractiveMarkerFeedback, marker_feedback_CB)
     #----- Publisher -------# 
-    pub_car_1_result    = rospy.Publisher('car_1_result'  , PoseStamped ,queue_size = 10,  latch=False)
-    pub_car_2_result    = rospy.Publisher('car_2_result'  , PoseStamped ,queue_size = 10,  latch=False)
-    pub_car_big_result  = rospy.Publisher('car_big_result', PoseStamped ,queue_size = 10,  latch=False)
-    pub_car_1_current    = rospy.Publisher('car_1_current'  , PoseStamped ,queue_size = 10,  latch=False)
-    pub_car_2_current    = rospy.Publisher('car_2_current'  , PoseStamped ,queue_size = 10,  latch=False)
-    pub_car_big_current  = rospy.Publisher('car_big_current', PoseStamped ,queue_size = 10,  latch=False)
+    pub_car_1_result     = rospy.Publisher('car_1_result'  , PoseStamped ,queue_size = 10,  latch=True)
+    pub_car_2_result     = rospy.Publisher('car_2_result'  , PoseStamped ,queue_size = 10,  latch=True)
+    pub_car_big_result   = rospy.Publisher('car_big_result', PoseStamped ,queue_size = 10,  latch=True)
+    pub_car_1_current    = rospy.Publisher('car_1_current'  , PoseStamped ,queue_size = 10,  latch=True)
+    pub_car_2_current    = rospy.Publisher('car_2_current'  , PoseStamped ,queue_size = 10,  latch=True)
+    pub_car_big_current  = rospy.Publisher('car_big_current', PoseStamped ,queue_size = 10,  latch=True)
     #--   publish marker --# 
     pub_marker_sphere     = rospy.Publisher('marker_sphere', MarkerArray,queue_size = 1,latch=True)
     pub_marker_line       = rospy.Publisher('marker_line'  , MarkerArray,queue_size = 1,latch=True)
@@ -601,31 +565,13 @@ def main(args):
     #------- Markers: Two cars -----------# 
     position = Point(0,0,0)
     make6DofMarker( False , InteractiveMarkerControl.MOVE_ROTATE_3D, position, True , "car_1")
-    # server.setCallback("car_1", car_1_constriant, InteractiveMarkerFeedback.POSE_UPDATE )
     position = Point( L,0,0)
     make6DofMarker( False, InteractiveMarkerControl.MOVE_ROTATE_3D, position, True , "car_2")
-    # server.setCallback("car_2", car_2_constriant, InteractiveMarkerFeedback.POSE_UPDATE )
     #------- Markers: Two sliders -----------# 
     position = Point(-3,  INIT_VC/SLIDER_GAIN,0)
     makeYaxisMarker(position, "Vc")
     position = Point(-3.5,INIT_WC/SLIDER_GAIN,0)
     makeYaxisMarker(position, "Wc")
-    
-    r = rospy.Rate(30) #call at 30HZ
-    # --- init publish markers ---# 
-
-    p = cal_small_car_position((car_big.x_p,car_big.y_p, car_big.theta_p)) # ((x1,y1),(x2,y2))
-
-    (car_1.x_p,car_2.y_p) = p[0]
-    car_1.cal_IK()
-
-    (car_2.x_p,car_2.y_p) = p[1]
-    car_2.cal_IK()
-    
-    car_1.cal_FK()
-    car_2.cal_FK()
-    car_big.cal_FK()
-
 
     # --- init text markers ---# 
     set_text((-3  ,INIT_VC+1) , str(round(car_big.v ,2)) , (255,255,255) , 0.3, 0) # Vc slider text
@@ -651,12 +597,13 @@ def main(args):
     set_sphere((car_2.x_c,car_2.y_c),     (0,255,255) , 0.2, 1)
     set_sphere((car_big.x_c,car_big.y_c), (0,255,255) , 0.2, 2)
 
-    car_1.update_markers()
-    car_2.update_markers()
-    car_big.update_markers()
-
-    server.applyChanges()
-
+    #---- Init Markers ----# 
+    init = InteractiveMarkerFeedback()
+    init.marker_name = "car_1"
+    init.header.frame_id = "base_link"
+    marker_feedback_CB(init)
+    print (car_big.is_need_pub)
+    r = rospy.Rate(30) #call at 30HZ
     while (not rospy.is_shutdown()):
         if  car_1.is_need_pub or car_2.is_need_pub or car_big.is_need_pub:
             #---- update car big pose ----# 
@@ -690,3 +637,5 @@ if __name__ == '__main__':
        main(sys.argv)
     except rospy.ROSInterruptException:
         pass
+
+
