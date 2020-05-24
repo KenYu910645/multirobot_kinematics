@@ -116,7 +116,6 @@ class Car():
             r = v/w # divide by zero
         except ZeroDivisionError:
             # w = INF_SMALL
-            # r = v/w
             r = float('inf')
         # --- rotation center ----# 
         x_c = x - r*sin(theta)
@@ -167,24 +166,20 @@ class Car():
             self.theta_p = normalize_angle(self.theta_p + pi) # Switch the direction 
         
         #---- Go forward of Go backward ? ----#
-        '''
-        dtheta = normalize_angle(self.theta_p - self.theta)
+        self.w = (self.theta_p - self.theta) / DT
+        dtheta = self.theta_p - self.theta
         if   dtheta > pi :
             self.w = (self.theta_p - self.theta - 2*pi) / DT
         elif dtheta < -pi :
             self.w = (self.theta_p - self.theta + 2*pi) / DT
-        '''
-        self.w = (self.theta_p - self.theta) / DT
+        
+        
 
         if self.w != 0:
             self.v = self.w * self.r 
         else : 
             self.v = (self.x_p - self.x) / DT
 
-        if self.id == 0:
-            print ("self.r: " + str(self.r))
-            print ("self.w: " + str(self.w))
-            print ("self.v: " + str(self.v))
 
     def update_markers(self):
         
@@ -219,13 +214,26 @@ class Car():
             points.append( (self.x   , self.y) )
             points.append( (self.x_p , self.y_p) )
         else: 
+
             theta_start = atan2( (self.y   - self.y_c) ,(self.x   - self.x_c) )
-            theta_end   = atan2( (self.y_p - self.y_c) ,(self.x_p - self.x_c) )
+            #if self.id == 2: 
+            #    print ("theta_start : " + str(theta_start))
+            # theta_end   = atan2( (self.y_p - self.y_c) ,(self.x_p - self.x_c) )
+            
             for i in range (NUM_LINE_SEG + 1):
                 t = (DT/NUM_LINE_SEG)*i
-                point = (self.x_c + self.r*cos(theta_start + self.w*t), self.y_c + self.r*sin(theta_start + self.w*t))
+                point = (self.x_c + abs(self.r)*cos(theta_start + self.w*t), self.y_c + abs(self.r)*sin(theta_start + self.w*t))
                 points.append(point)
             
+            '''
+            point = (self.x_c + self.r*cos(theta_start), self.y_c + self.r*sin(theta_start))
+            if self.id == 2:
+                print ("r:" + str(self.r))
+                print ("point: " + str(point))
+            points.append(point)
+            point = (self.x_c + self.r*cos(theta_start + self.w*DT), self.y_c + self.r*sin(theta_start + self.w*DT))
+            points.append(point)
+            '''
         modify_line(points, self.id)
         
         # --Allow main loop to publish markers-- # 
@@ -236,7 +244,6 @@ class Car():
 car_1   = Car(0, (0,0,0,0,0))
 car_2   = Car(1, (L,0,0,0,0))
 car_big = Car(2, (L/2,0,0,INIT_VC,INIT_WC))
-
 
 #############################
 ###  Marker Initialize    ###
