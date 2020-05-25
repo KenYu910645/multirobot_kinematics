@@ -5,7 +5,7 @@ import time
 from math import sin, cos , pi, atan2 ,acos,asin, sqrt
 # ROS msg and libraries
 from nav_msgs.msg import OccupancyGrid, Path # Global map 
-from geometry_msgs.msg import Point, PoseArray, PoseStamped, Pose2D, Pose,PoseWithCovarianceStamped# Global path
+from geometry_msgs.msg import Point, PoseArray, PoseStamped, Pose2D, Pose,PoseWithCovarianceStamped, Quaternion# Global path
 from tf import transformations
 import tf
 from visualization_msgs.msg import InteractiveMarkerFeedback
@@ -27,9 +27,12 @@ INF_SMALL = 0.00000001
 EQUALITY_ERROR = 0.000001
 L = 4
 #--- init value -----# 
-INIT_VC = 5
-INIT_WC = 5
+INIT_VC = 3
+INIT_WC = 0.6
 SLIDER_GAIN = 1
+INIT_CAR1_THETA = pi/3
+INIT_CAR2_THETA = pi/4
+INIT_CARBIG_THETA = pi/4
 #---- Global variable ----# 
 server = None # For interative markers
 marker_sphere = MarkerArray()
@@ -173,8 +176,6 @@ class Car():
         elif dtheta < -pi :
             self.w = (self.theta_p - self.theta + 2*pi) / DT
         
-        
-
         if self.w != 0:
             self.v = self.w * self.r 
         else : 
@@ -182,29 +183,22 @@ class Car():
 
 
     def update_markers(self):
-        
-        # ----- update kinematics result(Final Pose) ------# 
-        self.kinematic_result.header.frame_id = "base_link"
-        self.kinematic_result.header.stamp = rospy.get_rostime()
-        self.kinematic_result.pose.position.x = self.x_p
-        self.kinematic_result.pose.position.y = self.y_p
-        q = tf.transformations.quaternion_from_euler(0, 0, self.theta_p)
-        self.kinematic_result.pose.orientation.x = q[0]
-        self.kinematic_result.pose.orientation.y = q[1]
-        self.kinematic_result.pose.orientation.z = q[2]
-        self.kinematic_result.pose.orientation.w = q[3]
-        
         #------ update kinematics current (init pose) ---# 
         self.kinematic_current.header.frame_id = "base_link"
         self.kinematic_current.header.stamp = rospy.get_rostime()
-        self.kinematic_current.pose.position.x = self.x
-        self.kinematic_current.pose.position.y = self.y
+        self.kinematic_current.pose.position = Point(self.x, self.y, 0)
+        # if self.id == 0 : 
+        #    print (self.theta)
         q = tf.transformations.quaternion_from_euler(0, 0, self.theta)
-        self.kinematic_current.pose.orientation.x = q[0]
-        self.kinematic_current.pose.orientation.y = q[1]
-        self.kinematic_current.pose.orientation.z = q[2]
-        self.kinematic_current.pose.orientation.w = q[3]
+        self.kinematic_current.pose.orientation = Quaternion(q[0],q[1],q[2],q[3])
 
+        # ----- update kinematics result(Final Pose) ------# 
+        self.kinematic_result.header.frame_id = "base_link"
+        self.kinematic_result.header.stamp = rospy.get_rostime()
+        self.kinematic_result.pose.position = Point(self.x_p, self.y_p, 0)
+        q = tf.transformations.quaternion_from_euler(0, 0, self.theta_p)
+        self.kinematic_result.pose.orientation = Quaternion(q[0],q[1],q[2],q[3])
+        
         # ---- update rotation center -----# 
         modify_sphere((self.x_c,self.y_c), self.id)
         # ---- update path arc -----#
@@ -215,25 +209,11 @@ class Car():
             points.append( (self.x_p , self.y_p) )
         else: 
 
-            theta_start = atan2( (self.y   - self.y_c) ,(self.x   - self.x_c) )
-            #if self.id == 2: 
-            #    print ("theta_start : " + str(theta_start))
-            # theta_end   = atan2( (self.y_p - self.y_c) ,(self.x_p - self.x_c) )
-            
+            theta_start = atan2( (self.y   - self.y_c) ,(self.x   - self.x_c) )         
             for i in range (NUM_LINE_SEG + 1):
                 t = (DT/NUM_LINE_SEG)*i
                 point = (self.x_c + abs(self.r)*cos(theta_start + self.w*t), self.y_c + abs(self.r)*sin(theta_start + self.w*t))
                 points.append(point)
-            
-            '''
-            point = (self.x_c + self.r*cos(theta_start), self.y_c + self.r*sin(theta_start))
-            if self.id == 2:
-                print ("r:" + str(self.r))
-                print ("point: " + str(point))
-            points.append(point)
-            point = (self.x_c + self.r*cos(theta_start + self.w*DT), self.y_c + self.r*sin(theta_start + self.w*DT))
-            points.append(point)
-            '''
         modify_line(points, self.id)
         
         # --Allow main loop to publish markers-- # 
@@ -241,10 +221,14 @@ class Car():
 
 #--- Init cars -----# 
 #           id ,x,y,theta,v,w
-car_1   = Car(0, (0,0,0,0,0))
-car_2   = Car(1, (L,0,0,0,0))
-car_big = Car(2, (L/2,0,0,INIT_VC,INIT_WC))
-
+car_1   = Car(0, (0,0,INIT_CAR1_THETA,0,0))
+car_2   = Car(1, (0,0,INIT_CAR2_THETA,0,0))
+car_big = Car(2, ((L/2)*cos(INIT_CARBIG_THETA) , (L/2)*sin(INIT_CARBIG_THETA)  , INIT_CARBIG_THETA , INIT_VC , INIT_WC))
+(p1, p2) = cal_small_car_position( ( (L/2)*cos(INIT_CARBIG_THETA) , (L/2)*sin(INIT_CARBIG_THETA)  , INIT_CARBIG_THETA ) )
+car_1.x = p2[0]
+car_1.y = p2[1]
+car_2.x = p1[0]
+car_2.y = p1[1]
 #############################
 ###  Marker Initialize    ###
 #############################
@@ -368,10 +352,10 @@ def modify_sphere(point, id):
 ###########################################
 ###  Interactive Marker Modification    ###
 ###########################################
-def make6DofMarker( fixed, interaction_mode, position, show_6dof = False, name="marker"):
+def make6DofMarker( fixed, interaction_mode, pose, show_6dof = False, name="marker"):
     int_marker = InteractiveMarker()
     int_marker.header.frame_id = "base_link"
-    int_marker.pose.position = position
+    int_marker.pose = pose
     int_marker.scale = 1
 
     int_marker.name = ""
@@ -540,10 +524,10 @@ def marker_feedback_CB(data):
     marker_text.markers[3].text = "W_car_1 : " + str(round(car_1.w ,2))
     marker_text.markers[4].text = "V_car_2 : " + str(round(car_2.v ,2))
     marker_text.markers[5].text = "W_car_2 : " + str(round(car_2.w ,2))
-    marker_text.markers[6].text = "Theta_car_1 : "   + str(round(car_1.theta   ,2))
-    marker_text.markers[7].text = "Theta_P_car_1 : " + str(round(car_1.theta_p ,2))
-    marker_text.markers[8].text = "Theta_car_2 : "   + str(round(car_2.theta   ,2))
-    marker_text.markers[9].text = "Theta_P_car_2 : " + str(round(car_2.theta_p ,2))
+    # marker_text.markers[6].text = "Theta_car_1 : "   + str(round(car_1.theta   ,2))
+    # marker_text.markers[7].text = "Theta_P_car_1 : " + str(round(car_1.theta_p ,2))
+    # marker_text.markers[8].text = "Theta_car_2 : "   + str(round(car_2.theta   ,2))
+    # marker_text.markers[9].text = "Theta_P_car_2 : " + str(round(car_2.theta_p ,2))
     #--- Update markers ----# 
     car_1.update_markers()
     car_2.update_markers()
@@ -570,10 +554,13 @@ def main(args):
     server = InteractiveMarkerServer("basic_controls")
 
     #------- Markers: Two cars -----------# 
-    position = Point(0,0,0)
-    make6DofMarker( False , InteractiveMarkerControl.MOVE_ROTATE_3D, position, True , "car_1")
-    position = Point( L,0,0)
-    make6DofMarker( False, InteractiveMarkerControl.MOVE_ROTATE_3D, position, True , "car_2")
+    # print ("car_1 theta : " + str(car_1.theta))
+    q = tf.transformations.quaternion_from_euler(0, 0, car_1.theta)
+    pose = Pose(Point(car_1.x,car_1.y,0), Quaternion(q[0],q[1],q[2],q[3])) # 0 degree
+    make6DofMarker( False, InteractiveMarkerControl.MOVE_ROTATE_3D, pose, True , "car_1")
+    q = tf.transformations.quaternion_from_euler(0, 0, car_2.theta)
+    pose = Pose(Point(car_2.x,car_2.y,0), Quaternion(q[0],q[1],q[2],q[3]))# 45 degree
+    make6DofMarker( False, InteractiveMarkerControl.MOVE_ROTATE_3D, pose, True , "car_2")
     #------- Markers: Two sliders -----------# 
     position = Point(-3,  INIT_VC/SLIDER_GAIN,0)
     makeYaxisMarker(position, "Vc")
@@ -587,10 +574,10 @@ def main(args):
     set_text((0,-1.5) , "W_car_1 : " + str(round(car_1.w ,2)) , (255,255,255) , 0.3, 3)
     set_text((0,-2)   , "V_car_2 : " + str(round(car_2.v ,2)) , (255,255,255) , 0.3, 4)
     set_text((0,-2.5) , "W_car_2 : " + str(round(car_2.w ,2)) , (255,255,255) , 0.3, 5)
-    set_text((-3,0)    , "Theta_car_1 : " + str(round(car_1.theta ,2)) , (255,255,255) , 0.3, 6)
-    set_text((-3,-0.5) , "Theta_P_car_1 : " + str(round(car_1.theta_p ,2)) , (255,255,255) , 0.3, 7)
-    set_text((-3,-1)   , "Theta_car_2 : " + str(round(car_2.theta ,2)) , (255,255,255) , 0.3, 8)
-    set_text((-3,-1.5) , "Theta_P_car_2 : " + str(round(car_2.theta_p ,2)) , (255,255,255) , 0.3, 9)
+    # set_text((-3,0)    , "Theta_car_1 : " + str(round(car_1.theta ,2)) , (255,255,255) , 0.3, 6)
+    # set_text((-3,-0.5) , "Theta_P_car_1 : " + str(round(car_1.theta_p ,2)) , (255,255,255) , 0.3, 7)
+    # set_text((-3,-1)   , "Theta_car_2 : " + str(round(car_2.theta ,2)) , (255,255,255) , 0.3, 8)
+    # set_text((-3,-1.5) , "Theta_P_car_2 : " + str(round(car_2.theta_p ,2)) , (255,255,255) , 0.3, 9)
     #---- init lines ------# Yellow line for arcs 
     set_line([], (255,255,0), 0.02,0) # car_1 
     set_line([], (255,255,0), 0.02,1) # car_2
@@ -606,10 +593,9 @@ def main(args):
 
     #---- Init Markers ----# 
     init = InteractiveMarkerFeedback()
-    init.marker_name = "car_1"
+    init.marker_name = ""
     init.header.frame_id = "base_link"
     marker_feedback_CB(init)
-    print (car_big.is_need_pub)
     r = rospy.Rate(30) #call at 30HZ
     while (not rospy.is_shutdown()):
         if  car_1.is_need_pub or car_2.is_need_pub or car_big.is_need_pub:
@@ -618,6 +604,7 @@ def main(args):
             modify_line(cal_small_car_position((car_big.x_p, car_big.y_p, car_big.theta_p)) ,4)
             #---- update car_1 ----# 
             pub_car_1_result.publish(car_1.kinematic_result)
+            # print (car_1.kinematic_current)
             pub_car_1_current.publish(car_1.kinematic_current)
             #---- update car_2 -----# 
             pub_car_2_result.publish(car_2.kinematic_result)
