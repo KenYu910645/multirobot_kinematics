@@ -26,16 +26,9 @@ INF_SMALL = 0.00000001
 EQUALITY_ERROR = 0.000001
 L = 4
 #--- init value -----# 
-INIT_VC = 3
-INIT_WC = 0.6
-SLIDER_GAIN = 1
 INIT_CAR1_THETA = pi/3
 INIT_CAR2_THETA = pi/4
 INIT_CARBIG_THETA = pi/4
-
-############################
-###   Utility Function   ###
-############################
 
 def cal_small_car_position(pose):
     '''
@@ -51,9 +44,119 @@ def cal_small_car_position(pose):
     y2 = pose[1] - (L/2)*sin(pose[2])
     return ((x1,y1),(x2,y2))
 
+def make6DofMarker(name, marker_type, frame_id, scale, RGB, feedback_cb, 
+                   fixed, interaction_mode, pose, show_6dof = True):
+    '''
+    scale.x is the shaft diameter, 
+    and scale.y is the head diameter. 
+    If scale.z is not zero, it specifies the head length. 
+    '''
+    # Init interactive markers
+    int_marker = InteractiveMarker()
+    int_marker.header.frame_id = frame_id
+    int_marker.pose = pose
+    int_marker.scale = scale
+    int_marker.name = name
+    int_marker.description = name
+
+    # Init visualization markers
+    marker = Marker()
+    marker.type = marker_type
+    if marker_type == 0: # ARROW
+        marker.scale.x = scale * 1.0
+        marker.scale.y = scale * 0.1
+        marker.scale.z = scale * 0.1
+    else:
+        marker.scale.x = scale
+        marker.scale.y = scale
+        marker.scale.z = scale
+    marker.color.r = RGB[0]/255.0
+    marker.color.g = RGB[1]/255.0
+    marker.color.b = RGB[2]/255.0
+    marker.color.a = 1.0
+
+    # Set controller
+    control = InteractiveMarkerControl()
+    control.always_visible = True
+    control.markers.append( marker )
+    int_marker.controls.append(control)
+    int_marker.controls[0].interaction_mode = interaction_mode
+
+    # Flags 
+    if show_6dof:
+        control = InteractiveMarkerControl()
+        control.orientation.w = 1
+        control.orientation.x = 0
+        control.orientation.y = 1
+        control.orientation.z = 0
+        control.name = "rotate_z"
+        control.interaction_mode = InteractiveMarkerControl.ROTATE_AXIS
+        if fixed:
+            control.orientation_mode = InteractiveMarkerControl.FIXED
+        int_marker.controls.append(control)
+    
+    # Insert new interative marker to server
+    SERVER.insert(int_marker, feedback_cb)
+
+def makeYaxisMarker(position, name ):
+    # create an interactive marker for our SERVER
+    int_marker = InteractiveMarker()
+    int_marker.pose.position = position
+    int_marker.scale = 1
+
+    q = tf.transformations.quaternion_from_euler(0, 0, pi/2)
+    int_marker.pose.orientation.x = q[0]
+    int_marker.pose.orientation.y = q[1]
+    int_marker.pose.orientation.z = q[2]
+    int_marker.pose.orientation.w = q[3]
+
+    int_marker.pose.orientation.x
+    int_marker.header.frame_id = "base_link"
+    int_marker.name = name
+    int_marker.description = name
+
+    # create a grey box marker
+    box_marker = makeBox(int_marker)
+
+    # create a non-interactive control which contains the box
+    box_control = InteractiveMarkerControl()
+    box_control.always_visible = True
+    box_control.markers.append( box_marker )
+
+    # add the control to the interactive marker
+    int_marker.controls.append( box_control )
+
+    # create a control which will move the box
+    # this control does not contain any markers,
+    # which will cause RViz to insert two arrows
+    rotate_control = InteractiveMarkerControl()
+    rotate_control.name = "move_y"
+    rotate_control.interaction_mode = InteractiveMarkerControl.MOVE_AXIS
+
+    # add the control to the interactive marker
+    int_marker.controls.append(rotate_control);
+
+    # add the interactive marker to our collection &
+    # tell the server to call processFeedback() when feedback arrives for it
+    SERVER.insert(int_marker, marker_feedback_CB)
+
+def marker_feedback_CB(data):
+    pass 
+
+def car_m_feedback_cb(data):
+    '''
+    '''
+    global CAR_MID_XYT
+    quaternion = (
+        data.pose.orientation.x,
+        data.pose.orientation.y,
+        data.pose.orientation.z,
+        data.pose.orientation.w)
+    (_,_,yaw) = transformations.euler_from_quaternion(quaternion)
+    CAR_MID_XYT = (data.pose.position.x, data.pose.position.y, yaw)
+
 class Car():
-    def __init__(self, id, init_kine, marker_center_name, marker_arc_name): # unique id for every robot 
-        self.id = id 
+    def __init__(self, init_kine, marker_center_name, marker_arc_name):
         (self.x,self.y,self.theta,self.v,self.w) = init_kine
         # --Center of rotation-- # 
         self.x_c = 0
@@ -63,13 +166,10 @@ class Car():
         self.x_p = 0
         self.y_p = 0
         self.theta_p = 0
-        self.kinematic_current = PoseStamped()
         self.kinematic_result  = PoseStamped()
         # marker name
         self.marker_center_name = marker_center_name
         self.marker_arc_name = marker_arc_name
-        #-- Publish ---#
-        self.is_need_pub = True
         
     def cal_FK(self):
         '''
@@ -171,14 +271,6 @@ class Car():
             self.v = (self.x_p - self.x) / DT
 
     def update_markers(self):
-        #------ update kinematics current (init pose) ---# 
-        self.kinematic_current.header.frame_id = "base_link"
-        self.kinematic_current.header.stamp = rospy.get_rostime()
-        self.kinematic_current.pose.position = Point(self.x, self.y, 0)
-
-        q = tf.transformations.quaternion_from_euler(0, 0, self.theta)
-        self.kinematic_current.pose.orientation = Quaternion(q[0],q[1],q[2],q[3])
-
         # ----- update kinematics result(Final Pose) ------# 
         self.kinematic_result.header.frame_id = "base_link"
         self.kinematic_result.header.stamp = rospy.get_rostime()
@@ -212,196 +304,108 @@ class Car():
         # --Allow main loop to publish markers-- # 
         self.is_need_pub = True
 
-    def feedback_cb(self, data):
-        pass
-###########################################
-###  Interactive Marker Modification    ###
-###########################################
-def make6DofMarker(name, marker_type, frame_id, scale, RGB, feedback_cb, 
-                   fixed, interaction_mode, pose, show_6dof = True):
-    int_marker = InteractiveMarker()
-    int_marker.header.frame_id = frame_id
-    int_marker.pose = pose
-    int_marker.scale = scale
+    def run_once(self):
+        # Set x_p y_p
+        self.x_p = CAR_MID_XYT[0]
+        self.y_p = CAR_MID_XYT[1]
+        
+        # Assert check
+        if  self.x == None or\
+            self.y == None or\
+            self.theta == None or\
+            self.x_p == None or\
+            self.y_p == None: 
+            return False
+        
+        # Calculate inverse kinematics
+        self.cal_IK()
 
-    # int_marker.name = ""
-    # int_marker.description = ""
-    int_marker.name = name
-    int_marker.description = name
+        rospy.loginfo("r = " + str(self.r) + ", theta_p = " + str(self.theta_p))
+        return True
 
-    # insert a box
-    # makeBoxControl(int_marker)
-
-    marker = Marker()
-    marker.type = marker_type
-    marker.scale.x = scale
-    marker.scale.y = scale
-    marker.scale.z = scale
-    marker.color.r = RGB[0]/255.0
-    marker.color.g = RGB[1]/255.0
-    marker.color.b = RGB[2]/255.0
-    marker.color.a = 1.0
-
-    control = InteractiveMarkerControl()
-    control.always_visible = True
-    control.markers.append( marker )
-    int_marker.controls.append( control )
-    int_marker.controls[0].interaction_mode = interaction_mode
-
-    # if fixed:
-    #     int_marker.name += "_fixed"
-    #     int_marker.description += "\n(fixed orientation)"
-
-    # if interaction_mode != InteractiveMarkerControl.NONE:
-    #     control_modes_dict = { 
-    #                       InteractiveMarkerControl.MOVE_3D : "MOVE_3D",
-    #                       InteractiveMarkerControl.ROTATE_3D : "ROTATE_3D",
-    #                       InteractiveMarkerControl.MOVE_ROTATE_3D : "MOVE_ROTATE_3D" }
-    #     int_marker.name += "_" + control_modes_dict[interaction_mode]
-    #     int_marker.description = "3D Control"
-    #     if show_6dof: 
-    #       int_marker.description += " + 6-DOF controls"
-    #     int_marker.description += "\n" + control_modes_dict[interaction_mode]
-    
-    # int_marker.name = name 
-    # int_marker.description = name 
-    
-    if show_6dof: 
-        control = InteractiveMarkerControl()
-        control.orientation.w = 1
-        control.orientation.x = 0
-        control.orientation.y = 1
-        control.orientation.z = 0
-        control.name = "rotate_z"
-        control.interaction_mode = InteractiveMarkerControl.ROTATE_AXIS
-        if fixed:
-            control.orientation_mode = InteractiveMarkerControl.FIXED
-        int_marker.controls.append(control)
-    SERVER.insert(int_marker, marker_feedback_CB)
-
-def makeYaxisMarker(position, name ):
-    # create an interactive marker for our SERVER
-    int_marker = InteractiveMarker()
-    int_marker.pose.position = position
-    int_marker.scale = 1
-
-    q = tf.transformations.quaternion_from_euler(0, 0, pi/2)
-    int_marker.pose.orientation.x = q[0]
-    int_marker.pose.orientation.y = q[1]
-    int_marker.pose.orientation.z = q[2]
-    int_marker.pose.orientation.w = q[3]
-
-    int_marker.pose.orientation.x
-    int_marker.header.frame_id = "base_link"
-    int_marker.name = name
-    int_marker.description = name
-
-    # create a grey box marker
-    box_marker = makeBox(int_marker)
-
-    # create a non-interactive control which contains the box
-    box_control = InteractiveMarkerControl()
-    box_control.always_visible = True
-    box_control.markers.append( box_marker )
-
-    # add the control to the interactive marker
-    int_marker.controls.append( box_control )
-
-    # create a control which will move the box
-    # this control does not contain any markers,
-    # which will cause RViz to insert two arrows
-    rotate_control = InteractiveMarkerControl()
-    rotate_control.name = "move_y"
-    rotate_control.interaction_mode = InteractiveMarkerControl.MOVE_AXIS
-
-    # add the control to the interactive marker
-    int_marker.controls.append(rotate_control);
-
-    # add the interactive marker to our collection &
-    # tell the server to call processFeedback() when feedback arrives for it
-    SERVER.insert(int_marker, marker_feedback_CB)
-
-#############################
-###  Marker CB Function   ###
-#############################
-def marker_feedback_CB(data):
-    if data.marker_name[:3] == "car":
+    def car1_feedback_cb(self, data):
+        '''
+        '''
         quaternion = (
             data.pose.orientation.x,
             data.pose.orientation.y,
             data.pose.orientation.z,
             data.pose.orientation.w)
         euler = transformations.euler_from_quaternion(quaternion)
-        if data.marker_name == "car_1":
-            if data.pose.position.x != 0 or data.pose.position.y != 0: 
-                data.pose.position.x = 0
-                data.pose.position.y = 0
-                car_1.x = 0
-                car_1.y = 0
-                car_1.theta = normalize_angle (euler[2])
-                SERVER.setPose( data.marker_name, data.pose )
-            else: 
-                car_1.x     = data.pose.position.x
-                car_1.y     = data.pose.position.y
-                car_1.theta = normalize_angle (euler[2])
+        if data.pose.position.x != 0 or data.pose.position.y != 0: 
+            data.pose.position.x = 0
+            data.pose.position.y = 0
+            self.x = 0
+            self.y = 0
+            self.theta = normalize_angle (euler[2])
+            SERVER.setPose( data.marker_name, data.pose )
+        else: 
+            self.x     = data.pose.position.x
+            self.y     = data.pose.position.y
+            self.theta = normalize_angle (euler[2])
+        
+        self.update_markers()
+        SERVER.applyChanges()
+    
+    def car2_feedback_cb(self, data):
+        '''
+        '''
+        quaternion = (
+            data.pose.orientation.x,
+            data.pose.orientation.y,
+            data.pose.orientation.z,
+            data.pose.orientation.w)
+        euler = transformations.euler_from_quaternion(quaternion)
 
-        elif data.marker_name == "car_2":
-            yaw = atan2(data.pose.position.y, data.pose.position.x)
-            if data.pose.position.x != L * cos(yaw) or data.pose.position.y != L * sin(yaw):
-                data.pose.position.x = L * cos(yaw)
-                data.pose.position.y = L * sin(yaw)
-                car_2.x = L * cos(yaw)
-                car_2.y = L * sin(yaw)
-                car_2.theta = normalize_angle (euler[2])
-                SERVER.setPose( data.marker_name, data.pose )
-            else: 
-                car_2.x     = data.pose.position.x
-                car_2.y     = data.pose.position.y
-                car_2.theta = normalize_angle (euler[2])
-
-    #--- Update Textes ----# 
-    # marker_text.markers[2].text = "V_car_1 : " + str(round(car_1.v ,2))
-    # marker_text.markers[3].text = "W_car_1 : " + str(round(car_1.w ,2))
-    # marker_text.markers[4].text = "V_car_2 : " + str(round(car_2.v ,2))
-    # marker_text.markers[5].text = "W_car_2 : " + str(round(car_2.w ,2))
-    #--- Update markers ----# 
-    car_1.update_markers()
-    car_2.update_markers()
-    #--- Server change ----# 
-    SERVER.applyChanges()
+        yaw = atan2(data.pose.position.y, data.pose.position.x)
+        if data.pose.position.x != L * cos(yaw) or data.pose.position.y != L * sin(yaw):
+            data.pose.position.x = L * cos(yaw)
+            data.pose.position.y = L * sin(yaw)
+            self.x = L * cos(yaw)
+            self.y = L * sin(yaw)
+            self.theta = normalize_angle (euler[2])
+            SERVER.setPose( data.marker_name, data.pose )
+        else: 
+            self.x     = data.pose.position.x
+            self.y     = data.pose.position.y
+            self.theta = normalize_angle (euler[2])
+        
+        self.update_markers()
+        SERVER.applyChanges()
 
 if __name__ == '__main__':
     #----- Init node ------# 
     rospy.init_node('kinematics_double_arc', anonymous=True)
-    #----- Publisher -------# 
+    #----- Publisher -------#
     pub_car_1_result     = rospy.Publisher('car_1_result'  , PoseStamped ,queue_size = 10,  latch=True)
     pub_car_2_result     = rospy.Publisher('car_2_result'  , PoseStamped ,queue_size = 10,  latch=True)
-    pub_car_1_current    = rospy.Publisher('car_1_current'  , PoseStamped ,queue_size = 10,  latch=True)
-    pub_car_2_current    = rospy.Publisher('car_2_current'  , PoseStamped ,queue_size = 10,  latch=True)
     #------- Interactive Markers ---------# 
     SERVER = InteractiveMarkerServer("basic_controls")
     MARKER_MANAGER = Marker_Manager("markers")
    
     #--- Init cars -----# 
     #           id ,x,y,theta,v,w
-    car_1   = Car(0, (0,0,INIT_CAR1_THETA,0,0), "arc_center_start", "r_start")
-    car_2   = Car(1, (0,0,INIT_CAR2_THETA,0,0), "arc_center_end", "r_end")
+    car_1   = Car((0,0,INIT_CAR1_THETA,0,0), "arc_center_start", "r_start")
+    car_2   = Car((0,0,INIT_CAR2_THETA,0,0), "arc_center_end", "r_end")
     (p1, p2) = cal_small_car_position( ( (L/2)*cos(INIT_CARBIG_THETA) , (L/2)*sin(INIT_CARBIG_THETA)  , INIT_CARBIG_THETA ) )
     car_1.x = p2[0]
     car_1.y = p2[1]
     car_2.x = p1[0]
     car_2.y = p1[1]
-
-    #------- Markers: Two cars -----------# 
+    CAR_MID_XYT = (None, None, None)
+    #------- interactive markers -----------# 
     q = tf.transformations.quaternion_from_euler(0, 0, car_1.theta)
     pose = Pose(Point(car_1.x,car_1.y,0), Quaternion(q[0],q[1],q[2],q[3])) # 0 degree
-    make6DofMarker("car_1", 0, "base_link", 0.2, (255,0,0), car_1.feedback_cb,
+    make6DofMarker("car_1", 0, "base_link", 1.0, (181, 101, 167), car_1.car1_feedback_cb,
                    False, InteractiveMarkerControl.MOVE_ROTATE_3D, pose, True)
     q = tf.transformations.quaternion_from_euler(0, 0, car_2.theta)
     pose = Pose(Point(car_2.x,car_2.y,0), Quaternion(q[0],q[1],q[2],q[3]))# 45 degree
-    # make6DofMarker( False, InteractiveMarkerControl.MOVE_ROTATE_3D, pose, True , "car_2")
-    make6DofMarker("car_2", 0, "base_link", 0.2, (255,0,0), car_2.feedback_cb,
+    make6DofMarker("car_2", 0, "base_link", 1.0, (181, 101, 167), car_2.car2_feedback_cb,
                    False, InteractiveMarkerControl.MOVE_ROTATE_3D, pose, True)
+    pose = Pose(Point(0.5,0.5,0), Quaternion(0,0,0,1))
+    make6DofMarker("car_m", 2, "base_link", 0.2, (255, 255, 0), car_m_feedback_cb,
+                   False, InteractiveMarkerControl.MOVE_ROTATE_3D, pose, True)
+
     # --- init text markers ---# 
     # set_text((0,-1)   , "V_car_1 : " + str(round(car_1.v ,2)) , (255,255,255) , 0.3, 2)
     # set_text((0,-1.5) , "W_car_1 : " + str(round(car_1.w ,2)) , (255,255,255) , 0.3, 3)
@@ -419,22 +423,21 @@ if __name__ == '__main__':
     init = InteractiveMarkerFeedback()
     init.marker_name = ""
     init.header.frame_id = "base_link"
-    marker_feedback_CB(init)
+    car_1.car1_feedback_cb(init)
+    car_2.car2_feedback_cb(init)
 
     r = rospy.Rate(30) #call at 30HZ
     while (not rospy.is_shutdown()):
-        if  car_1.is_need_pub or car_2.is_need_pub:
+        if  car_1.run_once() or car_2.run_once():
             #---- update car_1 ----# 
             pub_car_1_result.publish(car_1.kinematic_result)
-            pub_car_1_current.publish(car_1.kinematic_current)
             #---- update car_2 -----# 
             pub_car_2_result.publish(car_2.kinematic_result)
-            pub_car_2_current.publish(car_2.kinematic_current)
             #---- update Textes -----# 
             # pub_marker_text.publish(marker_text)
+            car_1.update_markers()
+            car_2.update_markers()
             MARKER_MANAGER.publish()
-            #--- Reset flags ------# 
-            car_1.is_need_pub  = False
-            car_2.is_need_pub  = False
+            SERVER.applyChanges()
         r.sleep()
 
