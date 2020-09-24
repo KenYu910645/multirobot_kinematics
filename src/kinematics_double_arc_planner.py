@@ -2,7 +2,7 @@
 import rospy 
 import sys
 import time
-from math import sin, cos , pi, atan2 ,acos,asin, sqrt
+from math import sin, cos , pi, atan2 ,acos, asin, sqrt 
 import random
 import numpy as np
 # ROS
@@ -17,7 +17,7 @@ from interactive_markers.interactive_marker_server import *
 from interactive_markers.menu_handler import *
 from visualization_msgs.msg import *
 # Custom import
-from lucky_utility.ros.rospy_utility import Marker_Manager, normalize_angle
+from lucky_utility.ros.rospy_utility import Marker_Manager, normalize_angle, cal_ang_distance, sign
 
 DT = 0.5 # sec
 BIG_NUM = 100 # A very big number for infinity line drawing 
@@ -28,21 +28,6 @@ L = 4
 #--- init value -----# 
 INIT_CAR1_THETA = pi/3
 INIT_CAR2_THETA = pi/4
-INIT_CARBIG_THETA = pi/4
-
-def cal_small_car_position(pose):
-    '''
-    This should be only called by car_big
-    Input : 
-        pose = (x,y,theta)
-    Output: 
-        [(x1,y1),(x2,y2)]
-    '''
-    x1 = pose[0] + (L/2)*cos(pose[2])
-    y1 = pose[1] + (L/2)*sin(pose[2])
-    x2 = pose[0] - (L/2)*cos(pose[2])
-    y2 = pose[1] - (L/2)*sin(pose[2])
-    return ((x1,y1),(x2,y2))
 
 def make6DofMarker(name, marker_type, frame_id, scale, RGB, feedback_cb, 
                    fixed, interaction_mode, pose, show_6dof = True):
@@ -156,11 +141,13 @@ def car_m_feedback_cb(data):
     CAR_MID_XYT = (data.pose.position.x, data.pose.position.y, yaw)
 
 class Car():
-    def __init__(self, init_kine, marker_center_name, marker_arc_name):
+    def __init__(self, name, init_kine, marker_center_name, marker_arc_name):
         (self.x,self.y,self.theta,self.v,self.w) = init_kine
+        self.name = name
         # --Center of rotation-- # 
         self.x_c = 0
         self.y_c = 0
+        self.dir_center = "RHS" # 'LHS'
         self.r = 0
         # --Final position-- # 
         self.x_p = 0
@@ -255,7 +242,29 @@ class Car():
         v_s = np.cross( [ self.x - self.x_c , self.y - self.y_c ,0 ]   , [ cos(self.theta) , sin(self.theta),0] )
         v_e = np.cross( [ self.x_p - self.x_c , self.y_p - self.y_c,0] , [ cos(self.theta_p) , sin(self.theta_p),0] )
         if v_s[2] * v_e [2] < 0: # different sign 
-            self.theta_p = normalize_angle(self.theta_p + pi) # Switch the direction 
+            self.theta_p = normalize_angle(self.theta_p + pi) # Switch the direction
+        
+        # Judge center of rotation is at RHS or LHS
+        # if self.name == "start":
+        dtheta = self.theta_p - self.theta
+        if v_s[2] > 0 :
+            self.dir_center = "LHS"
+            # LHS
+            if dtheta > 0.0:
+                # print ("Forward")
+                self.v = 1.0
+            else:
+                # print("backward")
+                self.v = -1.0
+        else:
+            self.dir_center = "RHS"
+            # RHS
+            if dtheta < 0.0:
+                # print ("Forward")
+                self.v = 1.0
+            else:
+                # print("backward")
+                self.v = -1.0
         
         #---- Go forward of Go backward ? ----#
         self.w = (self.theta_p - self.theta) / DT
@@ -266,8 +275,8 @@ class Car():
             self.w = (self.theta_p - self.theta + 2*pi) / DT
         
         if self.w != 0:
-            self.v = self.w * self.r 
-        else : 
+            self.v = abs(self.w * self.r) * sign(self.v)
+        else:
             self.v = (self.x_p - self.x) / DT
 
     def update_markers(self):
@@ -279,30 +288,39 @@ class Car():
         self.kinematic_result.pose.orientation = Quaternion(q[0],q[1],q[2],q[3])
         
         # ---- update rotation center -----#
-        MARKER_MANAGER.update_marker(self.marker_center_name, (self.x_c,self.y_c))
-        # modify_sphere((self.x_c,self.y_c), self.id)
-        # ---- update path arc -----#
-        theta_start = atan2( (self.y   - self.y_c) ,(self.x   - self.x_c) )
-        # TODO clock-wise  , couter clock-wise
-        MARKER_MANAGER.update_marker(self.marker_arc_name,
-                                     (),
-                                     radius = self.r,
-                                     angle_range = (theta_start, theta_start + self.w*DT))
-        # points = []
-        # if abs(self.w) <= INF_SMALL: # draw a straight line
-        #     points.append( (self.x   , self.y) )
-        #     points.append( (self.x_p , self.y_p) )
-        # else: 
+        # MARKER_MANAGER.update_marker(self.marker_center_name, (self.x_c,self.y_c))
 
-        #     theta_start = atan2( (self.y   - self.y_c) ,(self.x   - self.x_c) )         
-        #     for i in range (NUM_LINE_SEG + 1):
-        #         t = (DT/NUM_LINE_SEG)*i
-        #         point = (self.x_c + abs(self.r)*cos(theta_start + self.w*t), self.y_c + abs(self.r)*sin(theta_start + self.w*t))
-        #         points.append(point)
-        # modify_line(points, self.id)
-        
-        # --Allow main loop to publish markers-- # 
-        self.is_need_pub = True
+        # ---- update text --------# 
+        if self.name == "start":
+            MARKER_MANAGER.update_marker("v1", (2,0), text = "v1=" + str(round(self.v,3)))
+            MARKER_MANAGER.update_marker("w1", (2,-0.3), text = "w1=" + str(round(self.w,3)))
+            MARKER_MANAGER.update_marker("r1", (2,-0.6), text = "r1=" + str(round(self.r,3)))
+            MARKER_MANAGER.update_marker("theta_p1", (2,-0.9), text = "dtheta1=" + str(round(self.theta_p - self.theta,3)))
+            MARKER_MANAGER.update_marker("length1", (2,-1.2), text = "length1=" + str(round((self.theta_p - self.theta)*self.r,3)))
+        if self.name == "end":
+            MARKER_MANAGER.update_marker("v2", (4,0), text = "v2=" + str(round(self.v,3)))
+            MARKER_MANAGER.update_marker("w2", (4,-0.3), text = "w2=" + str(round(self.w,3)))
+            MARKER_MANAGER.update_marker("r2", (4,-0.6), text = "r2=" + str(round(self.r,3)))
+            MARKER_MANAGER.update_marker("theta_p2", (4,-0.9), text = "dtheta2=" + str(round(self.theta_p - self.theta,3)))
+            MARKER_MANAGER.update_marker("length2", (4,-1.2), text = "length2=" + str(round((self.theta_p - self.theta)*self.r,3)))
+        # ---- update path arc -----#
+        theta_start = atan2((self.y - self.y_c) ,(self.x - self.x_c))
+        theta_end = theta_start + self.w*DT
+
+        # Arc can only draw in counter-clock wise direction
+        if   sign(self.v) > 0 and self.dir_center == "RHS": 
+            theta_end, theta_start = theta_start, theta_end # Swap
+        elif sign(self.v) < 0 and self.dir_center == "RHS": 
+            pass
+        if   sign(self.v) > 0 and self.dir_center == "LHS":
+            pass
+        elif sign(self.v) < 0 and self.dir_center == "LHS":
+            theta_end, theta_start = theta_start, theta_end # Swap
+
+        MARKER_MANAGER.update_marker(self.marker_arc_name,
+                                     (self.x_c, self.y_c),
+                                     radius = self.r,
+                                     angle_range = (theta_start, theta_end))
 
     def run_once(self):
         # Set x_p y_p
@@ -319,8 +337,6 @@ class Car():
         
         # Calculate inverse kinematics
         self.cal_IK()
-
-        rospy.loginfo("r = " + str(self.r) + ", theta_p = " + str(self.theta_p))
         return True
 
     def car1_feedback_cb(self, data):
@@ -344,7 +360,7 @@ class Car():
             self.y     = data.pose.position.y
             self.theta = normalize_angle (euler[2])
         
-        self.update_markers()
+        # self.update_markers()
         SERVER.applyChanges()
     
     def car2_feedback_cb(self, data):
@@ -370,7 +386,7 @@ class Car():
             self.y     = data.pose.position.y
             self.theta = normalize_angle (euler[2])
         
-        self.update_markers()
+        # self.update_markers()
         SERVER.applyChanges()
 
 if __name__ == '__main__':
@@ -384,40 +400,42 @@ if __name__ == '__main__':
     MARKER_MANAGER = Marker_Manager("markers")
    
     #--- Init cars -----# 
-    #           id ,x,y,theta,v,w
-    car_1   = Car((0,0,INIT_CAR1_THETA,0,0), "arc_center_start", "r_start")
-    car_2   = Car((0,0,INIT_CAR2_THETA,0,0), "arc_center_end", "r_end")
-    (p1, p2) = cal_small_car_position( ( (L/2)*cos(INIT_CARBIG_THETA) , (L/2)*sin(INIT_CARBIG_THETA)  , INIT_CARBIG_THETA ) )
-    car_1.x = p2[0]
-    car_1.y = p2[1]
-    car_2.x = p1[0]
-    car_2.y = p1[1]
+    #              x,y,theta,v,w
+    car_1   = Car("start", (0,0,INIT_CAR1_THETA,0,0), "arc_center_start", "r_start")
+    car_2   = Car("end", (0,0,INIT_CAR2_THETA,0,0), "arc_center_end", "r_end")
+    (car_1.x, car_1.y) = (0, 0)
+    (car_2.x, car_2.y) = (2.8284271247461903, 2.82842712474619)
     CAR_MID_XYT = (None, None, None)
     #------- interactive markers -----------# 
     q = tf.transformations.quaternion_from_euler(0, 0, car_1.theta)
     pose = Pose(Point(car_1.x,car_1.y,0), Quaternion(q[0],q[1],q[2],q[3])) # 0 degree
-    make6DofMarker("car_1", 0, "base_link", 1.0, (181, 101, 167), car_1.car1_feedback_cb,
+    make6DofMarker("start_pose", 0, "base_link", 1.0, (181, 101, 167), car_1.car1_feedback_cb,
                    False, InteractiveMarkerControl.MOVE_ROTATE_3D, pose, True)
     q = tf.transformations.quaternion_from_euler(0, 0, car_2.theta)
     pose = Pose(Point(car_2.x,car_2.y,0), Quaternion(q[0],q[1],q[2],q[3]))# 45 degree
-    make6DofMarker("car_2", 0, "base_link", 1.0, (181, 101, 167), car_2.car2_feedback_cb,
+    make6DofMarker("end_pose", 0, "base_link", 1.0, (255, 111, 97), car_2.car2_feedback_cb,
                    False, InteractiveMarkerControl.MOVE_ROTATE_3D, pose, True)
     pose = Pose(Point(0.5,0.5,0), Quaternion(0,0,0,1))
     make6DofMarker("car_m", 2, "base_link", 0.2, (255, 255, 0), car_m_feedback_cb,
                    False, InteractiveMarkerControl.MOVE_ROTATE_3D, pose, True)
 
     # --- init text markers ---# 
-    # set_text((0,-1)   , "V_car_1 : " + str(round(car_1.v ,2)) , (255,255,255) , 0.3, 2)
-    # set_text((0,-1.5) , "W_car_1 : " + str(round(car_1.w ,2)) , (255,255,255) , 0.3, 3)
-    # set_text((0,-2)   , "V_car_2 : " + str(round(car_2.v ,2)) , (255,255,255) , 0.3, 4)
-    # set_text((0,-2.5) , "W_car_2 : " + str(round(car_2.w ,2)) , (255,255,255) , 0.3, 5)
-
+    MARKER_MANAGER.register_marker("v1", 9 , "base_link", (255,255,255), 0.2)
+    MARKER_MANAGER.register_marker("w1"  , 9 , "base_link", (255,255,255), 0.2)
+    MARKER_MANAGER.register_marker("r1", 9 , "base_link", (255,255,255), 0.2)
+    MARKER_MANAGER.register_marker("theta_p1"  , 9 , "base_link", (255,255,255), 0.2)
+    MARKER_MANAGER.register_marker("length1"  , 9 , "base_link", (255,255,255), 0.2)
+    MARKER_MANAGER.register_marker("v2", 9 , "base_link", (255,255,255), 0.2)
+    MARKER_MANAGER.register_marker("w2"  , 9 , "base_link", (255,255,255), 0.2)
+    MARKER_MANAGER.register_marker("r2", 9 , "base_link", (255,255,255), 0.2)
+    MARKER_MANAGER.register_marker("theta_p2"  , 9 , "base_link", (255,255,255), 0.2)
+    MARKER_MANAGER.register_marker("length2"  , 9 , "base_link", (255,255,255), 0.2)
     #---- init lines ------# Yellow line for arcs
     MARKER_MANAGER.register_marker("r_start", 4 , "base_link", (255,255,0), 0.02)
     MARKER_MANAGER.register_marker("r_end"  , 4 , "base_link", (255,255,0), 0.02)
     # Center of rotation
-    MARKER_MANAGER.register_marker("arc_center_start", 2 ,"base_link", (255,255,255), 0.2)
-    MARKER_MANAGER.register_marker("arc_center_end", 2 ,"base_link", (255,255,255), 0.2)
+    # MARKER_MANAGER.register_marker("arc_center_start", 2 ,"base_link", (255,255,255), 0.2)
+    # MARKER_MANAGER.register_marker("arc_center_end", 2 ,"base_link", (255,255,255), 0.2)
 
     #---- Init Markers ----# 
     init = InteractiveMarkerFeedback()
@@ -428,7 +446,9 @@ if __name__ == '__main__':
 
     r = rospy.Rate(30) #call at 30HZ
     while (not rospy.is_shutdown()):
-        if  car_1.run_once() or car_2.run_once():
+        rc1 = car_1.run_once()
+        rc2 = car_2.run_once()
+        if rc1 or rc2:
             #---- update car_1 ----# 
             pub_car_1_result.publish(car_1.kinematic_result)
             #---- update car_2 -----# 
