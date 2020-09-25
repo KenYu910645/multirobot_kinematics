@@ -140,6 +140,24 @@ def car_m_feedback_cb(data):
     (_,_,yaw) = transformations.euler_from_quaternion(quaternion)
     CAR_MID_XYT = (data.pose.position.x, data.pose.position.y, yaw)
 
+def cal_double_arc(start_xyt, end_xyt):
+    A =  sin(start_xyt[2])
+    B = -sin(end_xyt[2])
+    C = start_xyt[0] - end_xyt[0]
+    D = -cos(start_xyt[2])
+    E =  cos(end_xyt[2])
+    F = start_xyt[1] - end_xyt[1]
+
+    LHS = np.array([[A,B],[D,E]])
+    RHS = np.array([C,F])
+    try:
+        (r1, r2) = np.linalg.solve(LHS,RHS)
+    except np.linalg.linalg.LinAlgError:
+        print ("NO SOLUTION!!!!!!!!!!!!!!!!!")
+    else:
+        print ("r1 = " + str(r1))
+        print ("r2 = " + str(r2))
+
 class Car():
     def __init__(self, name, init_kine, marker_center_name, marker_arc_name):
         (self.x,self.y,self.theta,self.v,self.w) = init_kine
@@ -389,6 +407,8 @@ class Car():
         # self.update_markers()
         SERVER.applyChanges()
 
+
+
 if __name__ == '__main__':
     #----- Init node ------# 
     rospy.init_node('kinematics_double_arc', anonymous=True)
@@ -449,6 +469,7 @@ if __name__ == '__main__':
         rc1 = car_1.run_once()
         rc2 = car_2.run_once()
         if rc1 or rc2:
+            cal_double_arc((car_1.x, car_1.y, car_1.theta), (car_2.x, car_2.y, car_2.theta))
             #---- update car_1 ----# 
             pub_car_1_result.publish(car_1.kinematic_result)
             #---- update car_2 -----# 
