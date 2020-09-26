@@ -141,6 +141,7 @@ def car_m_feedback_cb(data):
     CAR_MID_XYT = (data.pose.position.x, data.pose.position.y, yaw)
 
 def cal_double_arc(start_xyt, end_xyt):
+    global CAR_MID_XYT
     A =  sin(start_xyt[2])
     B = -sin(end_xyt[2])
     C = start_xyt[0] - end_xyt[0]
@@ -153,10 +154,16 @@ def cal_double_arc(start_xyt, end_xyt):
     try:
         (r1, r2) = np.linalg.solve(LHS,RHS)
     except np.linalg.linalg.LinAlgError:
-        print ("NO SOLUTION!!!!!!!!!!!!!!!!!")
+        # print ("NO SOLUTION!!!!!!!!!!!!!!!!!")
+        return None
     else:
-        print ("r1 = " + str(r1))
-        print ("r2 = " + str(r2))
+        theta2 = (start_xyt[2] - end_xyt[2]) / (1 - r2/r1)
+        theta1 = end_xyt[2] + theta2 - start_xyt[2]
+        CAR_MID_XYT = (start_xyt[0] - r1*sin(start_xyt[2]) + r1*sin(start_xyt[2] + theta1), 
+                       start_xyt[1] + r1*cos(start_xyt[2]) - r1*cos(start_xyt[2] + theta1),
+                       CAR_MID_XYT[2])
+        return (r1, r2, theta1, theta2)
+    
 
 class Car():
     def __init__(self, name, init_kine, marker_center_name, marker_arc_name):
@@ -306,7 +313,7 @@ class Car():
         self.kinematic_result.pose.orientation = Quaternion(q[0],q[1],q[2],q[3])
         
         # ---- update rotation center -----#
-        # MARKER_MANAGER.update_marker(self.marker_center_name, (self.x_c,self.y_c))
+        MARKER_MANAGER.update_marker(self.marker_center_name, (self.x_c,self.y_c))
 
         # ---- update text --------# 
         if self.name == "start":
@@ -407,8 +414,6 @@ class Car():
         # self.update_markers()
         SERVER.applyChanges()
 
-
-
 if __name__ == '__main__':
     #----- Init node ------# 
     rospy.init_node('kinematics_double_arc', anonymous=True)
@@ -454,8 +459,8 @@ if __name__ == '__main__':
     MARKER_MANAGER.register_marker("r_start", 4 , "base_link", (255,255,0), 0.02)
     MARKER_MANAGER.register_marker("r_end"  , 4 , "base_link", (255,255,0), 0.02)
     # Center of rotation
-    # MARKER_MANAGER.register_marker("arc_center_start", 2 ,"base_link", (255,255,255), 0.2)
-    # MARKER_MANAGER.register_marker("arc_center_end", 2 ,"base_link", (255,255,255), 0.2)
+    MARKER_MANAGER.register_marker("arc_center_start", 2 ,"base_link", (255,255,255), 0.2)
+    MARKER_MANAGER.register_marker("arc_center_end", 2 ,"base_link", (255,255,255), 0.2)
 
     #---- Init Markers ----# 
     init = InteractiveMarkerFeedback()
@@ -466,10 +471,11 @@ if __name__ == '__main__':
 
     r = rospy.Rate(30) #call at 30HZ
     while (not rospy.is_shutdown()):
+        cal_double_arc((car_1.x, car_1.y, car_1.theta), (car_2.x, car_2.y, car_2.theta))
+        print (str(CAR_MID_XYT))
         rc1 = car_1.run_once()
         rc2 = car_2.run_once()
         if rc1 or rc2:
-            cal_double_arc((car_1.x, car_1.y, car_1.theta), (car_2.x, car_2.y, car_2.theta))
             #---- update car_1 ----# 
             pub_car_1_result.publish(car_1.kinematic_result)
             #---- update car_2 -----# 
